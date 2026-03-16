@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from docx import Document
@@ -102,7 +103,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+def main() -> int:
     args = parse_args()
     if args.cmd == "text":
         cmd_text(args.infile)
@@ -110,7 +111,12 @@ def main() -> None:
         cmd_stats(args.infile)
     elif args.cmd == "replace":
         cmd_replace(args.infile, args.outfile, args.old, args.new)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        raise SystemExit(main())
+    except Exception as exc:  # noqa: BLE001
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(2)
