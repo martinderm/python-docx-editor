@@ -14,8 +14,12 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
      - `py -3 -m pip install python-docx`
    - Optional für Entwicklung gegen lokalen Clone:
      - `py -3 -m pip install -e vendor/python-docx`
-2. Nutze für Standardaufgaben `scripts/docx_ops.py`.
-3. Für Spezialfälle lade `references/python-docx-quickref.md` und implementiere gezielt.
+2. Prüfe, ob das Dokument Projektbezug hat (Titel, Projektnamen, Akronyme, Partnerlisten, WP-Struktur).
+3. Wenn Projektbezug vorliegt: lade vor Text-Transformationen die passende Projektreferenz aus
+   - `memory/references/projects/<project>/...` (falls vorhanden)
+   - und nutze sie als Stil-/Terminologie-Quelle (Begriffe, Rollen, formale Benennungen, Tonalität).
+4. Nutze für Standardaufgaben `scripts/docx_ops.py`.
+5. Für Spezialfälle lade `references/python-docx-quickref.md` und implementiere gezielt.
 
 ## Standardbefehle
 
@@ -31,6 +35,49 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
   - `py -3 scripts/extract_docx_for_llm.py --in <in.docx> --out <structure.v2.json> --rag-output <rag.v1.json>`
 - Gezieltes Minimal-Writeback via Patch:
   - `py -3 scripts/apply_docx_patch.py --in <in.docx> --out <out.docx> --patch <patch.json>`
+- Section-/DOCX-Preview für Review:
+  - `py -3 scripts/docx_preview.py v2-section --json <structure.v2.json> --title "<Section Title>"`
+  - `py -3 scripts/docx_preview.py docx-around --in <out.docx> --contains "<Heading Text>" --lines 25`
+
+## LLM-Default Editing Procedure (verbindlich)
+
+Nutze für Überarbeitungen standardmäßig diesen Ablauf (kein manuelles Range-Basteln im Normalfall):
+
+1. **Extrahieren (v2)**
+   - `py -3 scripts/extract_docx_for_llm.py --in <in.docx> --out <structure.v2.json>`
+2. **Kontext laden**
+   - Bei Projektbezug zusätzlich relevante Infos aus `memory/references/projects/<project>/...` laden (Terminologie, Rollen, Zielgruppen, Ton).
+3. **Edit-Plan erzeugen (LLM)**
+   - LLM erstellt einen Patch-Plan mit `ops[]` für `apply_docx_patch.py`.
+   - Für größere Umformungen immer `replace_paragraph_range` verwenden.
+   - `replace_text` nur für kleine, lokale Korrekturen.
+4. **Semantik-Check vor Apply**
+   - Bei Listen/Abschnitts-Rewrites: Original-Claims erfassen und im Zieltext wiederfinden.
+   - Keine inhaltstragenden Punkte stillschweigend entfernen.
+5. **Apply + Review**
+   - `py -3 scripts/apply_docx_patch.py --in <in.docx> --out <out.docx> --patch <patch.json>`
+   - `results[].removed_preview` prüfen (bei Range-Edits).
+6. **Feinschliff**
+   - Bei Bedarf zweiten, kleinen Patchlauf für Stil-/Rhythmuskorrektur.
+
+### Geltungsbereich der Überarbeitung
+
+Der Workflow gilt nicht nur für Listen, sondern allgemein für:
+- Abschnittsverdichtung (zu lang/zu redundant)
+- Abschnittsausbau (zu knapp)
+- Umstrukturierung (Listen ↔ Fließtext)
+- Terminologie-/Stilkonsistenz über das Dokument
+
+## Rewrite-Strategie (Abschnitte allgemein)
+
+Bei Abschnittsverbesserungen:
+- Identifiziere den Zielabschnitt in v2 (`Heading` + zugehöriger Content-Bereich).
+- Entscheide Modus explizit:
+  - `narrative` (Fließtext)
+  - `hybrid` (Fließtext + wenige kompakte Punkte)
+  - `preserve-list` (Liste bleibt, sprachlich verbessert)
+- Erzeuge einen zusammenhängenden Patch pro semantischem Block (Range-basiert statt atomisiert).
+- Halte Claim-Abdeckung hoch: Kerninhalte bleiben erhalten, nur Redundanz wird reduziert.
 
 ## JSON Schemas & Contracts
 
@@ -165,8 +212,11 @@ Pflichtparameter:
 - `--out` (Zielpfad für neue `.docx`)
 - `--patch` (Pfad zu Patch-JSON)
 
-Aktuell unterstützte Operation:
+Aktuell unterstützte Operationen:
 - `replace_text`
+- `set_paragraph`
+- `delete_paragraph`
+- `replace_paragraph_range`
 
 Patch-Datei-Schema:
 
@@ -178,29 +228,104 @@ Patch-Datei-Schema:
     "ops": {
       "type": "array",
       "items": {
-        "type": "object",
-        "required": ["op", "block_id", "find", "replace"],
-        "properties": {
-          "op": { "const": "replace_text" },
-          "block_id": {
-            "type": "string",
-            "description": "z.B. p_12 oder t_3_r1_25"
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["op", "block_id", "find", "replace"],
+            "properties": {
+              "op": { "const": "replace_text" },
+              "block_id": { "type": "string" },
+              "find": { "type": "string", "minLength": 1 },
+              "replace": { "type": "string" },
+              "expected_matches": { "type": "integer", "minimum": 0, "default": 1 }
+            },
+            "additionalProperties": false
           },
-          "find": { "type": "string", "minLength": 1 },
-          "replace": { "type": "string" },
-          "expected_matches": {
-            "type": "integer",
-            "minimum": 0,
-            "default": 1
+          {
+            "type": "object",
+            "required": ["op", "block_id", "text"],
+            "properties": {
+              "op": { "const": "set_paragraph" },
+              "block_id": { "type": "string" },
+              "text": { "type": "string" },
+              "style": { "type": "string" },
+              "expected_contains": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["op", "block_id"],
+            "properties": {
+              "op": { "const": "delete_paragraph" },
+              "block_id": { "type": "string" },
+              "expected_contains": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["op", "start_block_id", "end_block_id", "new_paragraphs"],
+            "properties": {
+              "op": { "const": "replace_paragraph_range" },
+              "start_block_id": { "type": "string", "pattern": "^p_[0-9]+$" },
+              "end_block_id": { "type": "string", "pattern": "^p_[0-9]+$" },
+              "expected_start_contains": { "type": "string" },
+              "expected_end_contains": { "type": "string" },
+              "allow_headings": { "type": "boolean", "default": false },
+              "new_paragraphs": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["text"],
+                  "properties": {
+                    "text": { "type": "string" },
+                    "style": { "type": "string" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
           }
-        },
-        "additionalProperties": false
+        ]
       }
     }
   },
   "additionalProperties": false
 }
 ```
+
+Zusatzschema für Listen→Fließtext-Refactoring (`replace_paragraph_range`):
+
+```json
+{
+  "op": "replace_paragraph_range",
+  "start_block_id": "p_27",
+  "end_block_id": "p_30",
+  "expected_start_contains": "Develops and maintains",
+  "expected_end_contains": "Define QM-Indicators",
+  "new_paragraphs": [
+    { "text": "Neuer Fließtext ...", "style": "Normal" },
+    { "text": "Optionaler kompakter Punkt ...", "style": "Compact" }
+  ]
+}
+```
+
+Regeln für `replace_paragraph_range`:
+- Ersetzt den gesamten Absatzbereich (`p_*` von start bis end, inkl.) atomar.
+- Fügt `new_paragraphs` ein und entfernt den alten Bereich vollständig (keine leeren Rest-Bullets).
+- Schützt Headings standardmäßig: wenn der Bereich Heading-Absätze enthält, bricht die Operation ab (nur mit `allow_headings: true` überschreibbar).
+- Bei mehreren Range-Operationen im selben Patch **von unten nach oben** (höhere `p_*` zuerst) arbeiten, damit IDs stabil bleiben.
+
+Qualitätsregeln für Listen→Fließtext:
+- Behandle zusammenhängende Listen als **eine semantische Einheit** (nicht Punkt-für-Punkt umformulieren).
+- Führe vor dem Patch eine Claim-Liste der Originalpunkte (1 Claim je Bullet).
+- Stelle sicher, dass jeder Claim im neuen Text wieder auftaucht (Inhaltserhalt statt freier Verdichtung).
+- Vermeide „Lonely bullet remnants": wenn nur 1 Punkt übrig bleibt, in Fließtext integrieren.
+- Bevorzuge bei operativen Abschnitten aktive Verben und konkrete Zuständigkeiten; keine unnötige Abstraktion.
+- Nutze `removed_preview` im Patch-Resultat als Pflicht-Review vor finaler Freigabe.
 
 ---
 
@@ -216,6 +341,36 @@ Patch-Datei-Schema:
 Erfolgsoutput (stdout) ist JSON:
 - `in`, `out`, `ops`, `results[]`
 - pro Operation: `op`, `block_id`, `matches`, `changes`, `status`
+
+## Prompt Contract für robuste Überarbeitungen
+
+Wenn der User „Abschnitt verbessern/überarbeiten“ sagt, soll der Agent intern diesen Plan erzwingen:
+- `target_section`: exakter Heading-Titel
+- `mode`: `narrative | hybrid | preserve-list`
+- `intent`: `shorten | expand | clarify | harmonize-style`
+- `must_keep`: Liste nicht verlierbarer Kernpunkte/Claims
+- `project_context_used`: welche Datei aus `memory/references/projects/...` verwendet wurde (falls vorhanden)
+- `style_profile`: gewünschter Stil (explizit vom User oder aus Kontext abgeleitet)
+
+Stil-Klärung (verbindlich):
+- Wenn Stil/Tonalität aus Prompt + Dokumentkontext **nicht klar** ableitbar ist, **vor dem Patch** den User kurz nach dem gewünschten Stil fragen.
+- Erst nach Stil-Klärung den finalen Patch erzeugen.
+
+Default-Style (wenn User keinen eigenen Stil vorgibt und Kontext konsistent ist):
+- Write in a natural, fluent, and precise style.
+- Prefer active voice, clear structure, and concise phrasing.
+- Vary sentence length and rhythm without sacrificing coherence.
+- Use less common words only when they add technical or conceptual precision, not decorative flair.
+- Maintain grammatical accuracy, logical clarity, and stylistic consistency.
+- Increase linguistic diversity (“perplexity” and “burstiness”) only insofar as it improves readability and nuance.
+
+Ausgabeformat vor Patch-Anwendung (kurz):
+- **Claims alt** (stichwortartig)
+- **Claims neu** (Mapping alt→neu)
+- **Style profile** (1-2 Zeilen)
+- **Ops-Plan** (`replace_paragraph_range` bevorzugt)
+
+Patch nur anwenden, wenn kein Kernclaim ungemappt bleibt.
 
 ## Quickstart (maintainer)
 

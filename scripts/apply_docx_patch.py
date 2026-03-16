@@ -31,6 +31,7 @@ import sys
 
 from docx import Document
 from docx.document import Document as DocumentObject
+from docx.oxml import OxmlElement
 from docx.oxml.table import CT_Tbl
 from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
@@ -213,6 +214,216 @@ def apply_replace_op(op: dict, paragraph_index: dict[str, Paragraph], table_inde
     }
 
 
+def clear_paragraph_numbering(paragraph: Paragraph) -> None:
+    ppr = paragraph._p.pPr  # pylint: disable=protected-access
+    if ppr is not None and ppr.numPr is not None:
+        ppr.remove(ppr.numPr)
+
+
+def style_looks_like_list(style_name: str | None) -> bool:
+    if not style_name:
+        return False
+    s = style_name.lower()
+    return any(k in s for k in ["list", "bullet", "number", "aufz", "aufl"])
+
+
+def apply_set_paragraph_op(op: dict, paragraph_index: dict[str, Paragraph]) -> dict:
+    block_id = op.get("block_id")
+    text = op.get("text")
+    style = op.get("style")
+    expected_contains = op.get("expected_contains")
+    clear_list_format = bool(op.get("clear_list_format", True))
+
+    if not isinstance(block_id, str) or not block_id:
+        raise ValueError("set_paragraph op braucht 'block_id'.")
+    if not isinstance(text, str):
+        raise ValueError("set_paragraph op braucht String in 'text'.")
+    if style is not None and not isinstance(style, str):
+        raise ValueError("set_paragraph op: 'style' muss String sein, wenn gesetzt.")
+    if expected_contains is not None and not isinstance(expected_contains, str):
+        raise ValueError("set_paragraph op: 'expected_contains' muss String sein, wenn gesetzt.")
+
+    if parse_table_block_id(block_id) is not None:
+        raise ValueError("set_paragraph unterstützt keine table block_ids (t_*).")
+
+    paragraph = paragraph_index.get(block_id)
+    if paragraph is None:
+        raise ValueError(f"Paragraph/Header/Footer block_id nicht gefunden: {block_id}")
+
+    current = paragraph.text or ""
+    if expected_contains is not None and expected_contains not in current:
+        raise ValueError(
+            f"Op auf {block_id}: expected_contains nicht gefunden. "
+            "Abbruch, um falsche Zielstellen zu vermeiden."
+        )
+
+    paragraph.text = text
+    if style:
+        paragraph.style = style
+
+    # Avoid leftover bullets/numbering when converting list items to prose.
+    if clear_list_format and not style_looks_like_list(style):
+        clear_paragraph_numbering(paragraph)
+
+    return {
+        "op": "set_paragraph",
+        "block_id": block_id,
+        "status": "ok",
+        "style": style if style else None,
+        "new_length": len(text),
+    }
+
+
+def apply_delete_paragraph_op(op: dict, paragraph_index: dict[str, Paragraph]) -> dict:
+    block_id = op.get("block_id")
+    expected_contains = op.get("expected_contains")
+
+    if not isinstance(block_id, str) or not block_id:
+        raise ValueError("delete_paragraph op braucht 'block_id'.")
+    if expected_contains is not None and not isinstance(expected_contains, str):
+        raise ValueError("delete_paragraph op: 'expected_contains' muss String sein, wenn gesetzt.")
+    if parse_table_block_id(block_id) is not None:
+        raise ValueError("delete_paragraph unterstützt keine table block_ids (t_*).")
+
+    paragraph = paragraph_index.get(block_id)
+    if paragraph is None:
+        raise ValueError(f"Paragraph/Header/Footer block_id nicht gefunden: {block_id}")
+
+    current = paragraph.text or ""
+    if expected_contains is not None and expected_contains not in current:
+        raise ValueError(
+            f"Op auf {block_id}: expected_contains nicht gefunden. "
+            "Abbruch, um falsche Zielstellen zu vermeiden."
+        )
+
+    p = paragraph._element  # pylint: disable=protected-access
+    parent = p.getparent()
+    if parent is None:
+        raise ValueError(f"Op auf {block_id}: Paragraph hat kein Parent-Element.")
+    parent.remove(p)
+
+    return {
+        "op": "delete_paragraph",
+        "block_id": block_id,
+        "status": "ok",
+    }
+
+
+def build_body_paragraph_order(doc: DocumentObject) -> list[str]:
+    order: list[str] = []
+    p_i = 0
+    for item in iter_block_items(doc):
+        if isinstance(item, Paragraph):
+            if not item.text or not item.text.strip():
+                continue
+            p_i += 1
+            order.append(f"p_{p_i}")
+    return order
+
+
+def insert_paragraph_after(paragraph: Paragraph, text: str, style: str | None = None) -> Paragraph:
+    new_p = OxmlElement("w:p")
+    paragraph._p.addnext(new_p)  # pylint: disable=protected-access
+    new_para = Paragraph(new_p, paragraph._parent)  # pylint: disable=protected-access
+    new_para.text = text
+    if style:
+        new_para.style = style
+    return new_para
+
+
+def apply_replace_paragraph_range_op(op: dict, doc: DocumentObject, paragraph_index: dict[str, Paragraph]) -> dict:
+    start_block_id = op.get("start_block_id")
+    end_block_id = op.get("end_block_id")
+    new_paragraphs = op.get("new_paragraphs")
+    expected_start_contains = op.get("expected_start_contains")
+    expected_end_contains = op.get("expected_end_contains")
+    allow_headings = bool(op.get("allow_headings", False))
+
+    if not isinstance(start_block_id, str) or not start_block_id.startswith("p_"):
+        raise ValueError("replace_paragraph_range braucht 'start_block_id' vom Typ p_<n>.")
+    if not isinstance(end_block_id, str) or not end_block_id.startswith("p_"):
+        raise ValueError("replace_paragraph_range braucht 'end_block_id' vom Typ p_<n>.")
+    if not isinstance(new_paragraphs, list) or len(new_paragraphs) == 0:
+        raise ValueError("replace_paragraph_range braucht nicht-leere 'new_paragraphs'-Liste.")
+
+    start_para = paragraph_index.get(start_block_id)
+    end_para = paragraph_index.get(end_block_id)
+    if start_para is None or end_para is None:
+        raise ValueError("replace_paragraph_range: start/end block_id nicht gefunden.")
+
+    if expected_start_contains is not None:
+        if not isinstance(expected_start_contains, str):
+            raise ValueError("expected_start_contains muss String sein.")
+        if expected_start_contains not in (start_para.text or ""):
+            raise ValueError("replace_paragraph_range: expected_start_contains nicht gefunden.")
+
+    if expected_end_contains is not None:
+        if not isinstance(expected_end_contains, str):
+            raise ValueError("expected_end_contains muss String sein.")
+        if expected_end_contains not in (end_para.text or ""):
+            raise ValueError("replace_paragraph_range: expected_end_contains nicht gefunden.")
+
+    order = build_body_paragraph_order(doc)
+    try:
+        i_start = order.index(start_block_id)
+        i_end = order.index(end_block_id)
+    except ValueError as exc:
+        raise ValueError("replace_paragraph_range: start/end block_id nicht in Body-Reihenfolge gefunden.") from exc
+    if i_start > i_end:
+        raise ValueError("replace_paragraph_range: start_block_id muss vor end_block_id liegen.")
+
+    old_ids = order[i_start : i_end + 1]
+    old_paragraphs = [paragraph_index[bid] for bid in old_ids]
+
+    if not allow_headings:
+        heading_hits = []
+        for bid, p in zip(old_ids, old_paragraphs):
+            style_name = p.style.name if p.style else ""
+            if style_name and (style_name.startswith("Heading") or style_name.startswith("Überschrift")):
+                heading_hits.append(f"{bid}({style_name})")
+        if heading_hits:
+            raise ValueError(
+                "replace_paragraph_range enthält Heading-Absätze: "
+                + ", ".join(heading_hits)
+                + ". Setze allow_headings=true nur wenn das absichtlich ist."
+            )
+
+    anchor = end_para
+    inserted = 0
+    for entry in new_paragraphs:
+        if not isinstance(entry, dict):
+            raise ValueError("replace_paragraph_range: jedes Element in new_paragraphs muss Objekt sein.")
+        text = entry.get("text")
+        style = entry.get("style")
+        if not isinstance(text, str):
+            raise ValueError("replace_paragraph_range: new_paragraphs[].text muss String sein.")
+        if style is not None and not isinstance(style, str):
+            raise ValueError("replace_paragraph_range: new_paragraphs[].style muss String sein, wenn gesetzt.")
+        anchor = insert_paragraph_after(anchor, text=text, style=style)
+        # New prose paragraphs should not accidentally inherit numbering.
+        if not style_looks_like_list(style):
+            clear_paragraph_numbering(anchor)
+        inserted += 1
+
+    removed_preview = [" ".join((p.text or "").split())[:120] for p in old_paragraphs]
+
+    for p in old_paragraphs:
+        el = p._element  # pylint: disable=protected-access
+        parent = el.getparent()
+        if parent is not None:
+            parent.remove(el)
+
+    return {
+        "op": "replace_paragraph_range",
+        "start_block_id": start_block_id,
+        "end_block_id": end_block_id,
+        "removed": len(old_paragraphs),
+        "inserted": inserted,
+        "removed_preview": removed_preview,
+        "status": "ok",
+    }
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Apply minimal block-targeted DOCX patches")
     p.add_argument("--in", dest="infile", type=existing_docx, required=True)
@@ -226,19 +437,30 @@ def main() -> int:
     patch = load_patch(args.patchfile)
 
     doc = Document(str(args.infile))
-    paragraph_index = build_paragraph_index(doc)
-    table_index = build_table_index(doc)
 
     results: list[dict] = []
     for i, op in enumerate(patch["ops"], start=1):
         if not isinstance(op, dict):
             raise ValueError(f"Op #{i} ist kein Objekt.")
 
+        # Rebuild indexes before each op to stay stable after insert/delete operations.
+        paragraph_index = build_paragraph_index(doc)
+        table_index = build_table_index(doc)
+
         op_kind = op.get("op")
         if op_kind == "replace_text":
             results.append(apply_replace_op(op, paragraph_index, table_index))
+        elif op_kind == "set_paragraph":
+            results.append(apply_set_paragraph_op(op, paragraph_index))
+        elif op_kind == "delete_paragraph":
+            results.append(apply_delete_paragraph_op(op, paragraph_index))
+        elif op_kind == "replace_paragraph_range":
+            results.append(apply_replace_paragraph_range_op(op, doc, paragraph_index))
         else:
-            raise ValueError(f"Unbekannte op '{op_kind}' bei Op #{i}. Unterstützt: replace_text")
+            raise ValueError(
+                f"Unbekannte op '{op_kind}' bei Op #{i}. "
+                "Unterstützt: replace_text, set_paragraph, delete_paragraph, replace_paragraph_range"
+            )
 
     args.outfile.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(args.outfile))
