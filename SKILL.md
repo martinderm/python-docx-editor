@@ -217,6 +217,7 @@ Aktuell unterstützte Operationen:
 - `set_paragraph`
 - `delete_paragraph`
 - `replace_paragraph_range`
+- `replace_paragraph_range_markdown`
 
 Patch-Datei-Schema:
 
@@ -243,13 +244,29 @@ Patch-Datei-Schema:
           },
           {
             "type": "object",
-            "required": ["op", "block_id", "text"],
+            "required": ["op", "block_id"],
             "properties": {
               "op": { "const": "set_paragraph" },
               "block_id": { "type": "string" },
               "text": { "type": "string" },
+              "runs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["text"],
+                  "properties": {
+                    "text": { "type": "string" },
+                    "bold": { "type": "boolean" },
+                    "italic": { "type": "boolean" },
+                    "code": { "type": "boolean" },
+                    "link": { "type": "string" }
+                  }
+                }
+              },
+              "markdown": { "type": "boolean", "default": false },
               "style": { "type": "string" },
-              "expected_contains": { "type": "string" }
+              "expected_contains": { "type": "string" },
+              "clear_list_format": { "type": "boolean", "default": true }
             },
             "additionalProperties": false
           },
@@ -278,14 +295,42 @@ Patch-Datei-Schema:
                 "minItems": 1,
                 "items": {
                   "type": "object",
-                  "required": ["text"],
                   "properties": {
                     "text": { "type": "string" },
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["text"],
+                        "properties": {
+                          "text": { "type": "string" },
+                          "bold": { "type": "boolean" },
+                          "italic": { "type": "boolean" },
+                          "code": { "type": "boolean" },
+                          "link": { "type": "string" }
+                        }
+                      }
+                    },
+                    "markdown": { "type": "boolean", "default": false },
                     "style": { "type": "string" }
                   },
                   "additionalProperties": false
                 }
               }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["op", "start_block_id", "end_block_id", "markdown"],
+            "properties": {
+              "op": { "const": "replace_paragraph_range_markdown" },
+              "start_block_id": { "type": "string", "pattern": "^p_[0-9]+$" },
+              "end_block_id": { "type": "string", "pattern": "^p_[0-9]+$" },
+              "expected_start_contains": { "type": "string" },
+              "expected_end_contains": { "type": "string" },
+              "allow_headings": { "type": "boolean", "default": false },
+              "markdown": { "type": "string" }
             },
             "additionalProperties": false
           }
@@ -318,6 +363,10 @@ Regeln für `replace_paragraph_range`:
 - Fügt `new_paragraphs` ein und entfernt den alten Bereich vollständig (keine leeren Rest-Bullets).
 - Schützt Headings standardmäßig: wenn der Bereich Heading-Absätze enthält, bricht die Operation ab (nur mit `allow_headings: true` überschreibbar).
 - Bei mehreren Range-Operationen im selben Patch **von unten nach oben** (höhere `p_*` zuerst) arbeiten, damit IDs stabil bleiben.
+
+Markdown→Word Support:
+- Inline (`markdown:true`): `*kursiv*`, `**fett**`, `***fett+kursiv***`, `` `code` ``, `[Text](https://...)`
+- Block-Level (`replace_paragraph_range_markdown`): Headings (`#`), Listen (`-`/`1.`), Zitate (`>`), Trennlinien (`---`), Tabellen (`|...|`)
 
 Qualitätsregeln für Listen→Fließtext:
 - Behandle zusammenhängende Listen als **eine semantische Einheit** (nicht Punkt-für-Punkt umformulieren).

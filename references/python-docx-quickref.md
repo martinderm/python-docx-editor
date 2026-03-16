@@ -45,9 +45,13 @@ Default-Workflow bei inhaltlicher Überarbeitung:
 - Zweck: gezielte Änderungen mit `block_id` zurückschreiben (ohne Full-Rewrite)
 - Unterstützte Operationen:
   - `replace_text` mit `block_id`, `find`, `replace`, optional `expected_matches` (Default 1)
-  - `set_paragraph` mit `block_id`, `text`, optional `style`, optional `expected_contains`
+  - `set_paragraph` mit `block_id`, optional `text` oder `runs[]`, optional `style`, optional `expected_contains`, optional `markdown:true`
   - `delete_paragraph` mit `block_id`, optional `expected_contains`
   - `replace_paragraph_range` mit `start_block_id`, `end_block_id`, `new_paragraphs[]` (optional `allow_headings`)
+  - `replace_paragraph_range_markdown` mit `start_block_id`, `end_block_id`, `markdown` (optional `allow_headings`)
+- Markdown→Word (neu):
+  - Inline: `*kursiv*`, `**fett**`, `***fett+kursiv***`, `` `code` ``, `[Text](https://...)`
+  - Block-Level via `replace_paragraph_range_markdown`: Heading (`#`), Listen (`-` / `1.`), Quote (`>`), Trennlinie (`---`), Tabellen (`|...|`)
 - Sicherheitsverhalten:
   - Fehler bei Mehrfachtreffern (wenn `expected_matches` nicht passt)
   - Fehler bei Treffern über Run-Grenzen (kein stilles Layout-Risiko)
