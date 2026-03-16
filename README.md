@@ -1,6 +1,6 @@
 # python-docx-editor
 
-Lightweight CLI toolkit for safe, reproducible `.docx` extraction and patching with `python-docx`.
+A DOCX editor for AI Agents: lightweight CLI toolkit for safe, reproducible `.docx` extraction and patching with `python-docx`.
 
 ## What it does
 
@@ -19,6 +19,10 @@ Install:
 ```bash
 py -3 -m pip install python-docx
 ```
+
+Upstream project (`python-docx`):
+
+- <https://github.com/python-openxml/python-docx>
 
 ## Quickstart
 
