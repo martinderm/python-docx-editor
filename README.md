@@ -77,6 +77,10 @@ py -3 scripts/selftest.py
 - `references/` – quick reference notes
 - `SKILL.md` – canonical workflow/spec documentation
 
+## License
+
+GNU General Public License v3.0 (GPL-3.0). See `LICENSE`.
+
 ## Status
 
 Project is focused on practical CLI workflows and LLM-assisted editing pipelines.
