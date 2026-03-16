@@ -10,10 +10,10 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
 ## Workflow
 
 1. Stelle sicher, dass `python-docx` verfügbar ist.
-   - Bevorzuge lokale Quelle (wenn vorhanden):
-     - `py -3 -m pip install -e vendor/python-docx`
-   - Fallback:
+   - Standard-Installation:
      - `py -3 -m pip install python-docx`
+   - Optional für Entwicklung gegen lokalen Clone:
+     - `py -3 -m pip install -e vendor/python-docx`
 2. Nutze für Standardaufgaben `scripts/docx_ops.py`.
 3. Für Spezialfälle lade `references/python-docx-quickref.md` und implementiere gezielt.
 

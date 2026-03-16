@@ -2,10 +2,10 @@
 
 ## Setup
 
-- Prefer local source clone at `vendor/python-docx` when available:
-  - `py -3 -m pip install -e vendor/python-docx`
-- Fallback:
+- Standard:
   - `py -3 -m pip install python-docx`
+- Optional (Entwicklung gegen lokalen Clone):
+  - `py -3 -m pip install -e vendor/python-docx`
 
 ## Common operations
 
