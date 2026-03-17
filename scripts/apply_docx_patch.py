@@ -156,6 +156,38 @@ def clear_paragraph_numbering(paragraph: Paragraph) -> None:
         ppr.remove(ppr.numPr)
 
 
+def get_paragraph_numbering(paragraph: Paragraph) -> tuple[int, int] | None:
+    ppr = paragraph._p.pPr  # pylint: disable=protected-access
+    if ppr is None or ppr.numPr is None:
+        return None
+    num_pr = ppr.numPr
+    num_id_el = num_pr.find(qn("w:numId"))
+    ilvl_el = num_pr.find(qn("w:ilvl"))
+    if num_id_el is None:
+        return None
+    try:
+        num_id = int(num_id_el.get(qn("w:val")))
+        ilvl = int(ilvl_el.get(qn("w:val"))) if ilvl_el is not None else 0
+    except Exception:
+        return None
+    return (num_id, ilvl)
+
+
+def set_paragraph_numbering(paragraph: Paragraph, num_id: int, ilvl: int = 0) -> None:
+    ppr = paragraph._p.get_or_add_pPr()  # pylint: disable=protected-access
+    if ppr.numPr is not None:
+        ppr.remove(ppr.numPr)
+
+    num_pr = OxmlElement("w:numPr")
+    ilvl_el = OxmlElement("w:ilvl")
+    ilvl_el.set(qn("w:val"), str(ilvl))
+    num_id_el = OxmlElement("w:numId")
+    num_id_el.set(qn("w:val"), str(num_id))
+    num_pr.append(ilvl_el)
+    num_pr.append(num_id_el)
+    ppr.append(num_pr)
+
+
 def style_looks_like_list(style_name: str | None) -> bool:
     if not style_name:
         return False
@@ -574,7 +606,12 @@ def parse_markdown_blocks(markdown: str) -> list[dict]:
     return blocks
 
 
-def render_markdown_blocks_after(anchor: Paragraph, markdown: str) -> tuple[Paragraph, int]:
+def render_markdown_blocks_after(
+    anchor: Paragraph,
+    markdown: str,
+    ul_numbering: tuple[int, int] | None = None,
+    ol_numbering: tuple[int, int] | None = None,
+) -> tuple[Paragraph, int]:
     blocks = parse_markdown_blocks(markdown)
     inserted = 0
     cur = anchor
@@ -613,8 +650,11 @@ def render_markdown_blocks_after(anchor: Paragraph, markdown: str) -> tuple[Para
 
         if btype in {"ul", "ol"}:
             style = "List Bullet" if btype == "ul" else "List Number"
+            numbering = ul_numbering if btype == "ul" else ol_numbering
             for item in b.get("items", []):
                 p = insert_paragraph_after(cur, style=style)
+                if numbering is not None:
+                    set_paragraph_numbering(p, numbering[0], numbering[1])
                 render_inline_markdown(p, item)
                 cur = p
                 inserted += 1
@@ -738,6 +778,33 @@ def apply_replace_paragraph_range_markdown_op(op: dict, doc: DocumentObject, par
     if not isinstance(markdown, str) or not markdown.strip():
         raise ValueError("replace_paragraph_range_markdown braucht nicht-leeren markdown-String.")
 
+    # Best-effort numbering hint from replaced range (for templates without List Bullet/List Number styles).
+    ul_hint = None
+    ol_hint = None
+    try:
+        order = build_body_paragraph_order(doc)
+        i_start = order.index(start_block_id)
+        i_end = order.index(end_block_id)
+        if i_start <= i_end:
+            old_ids = order[i_start : i_end + 1]
+            old_paragraphs = [paragraph_index[bid] for bid in old_ids if bid in paragraph_index]
+            old_numberings = [n for n in (get_paragraph_numbering(p) for p in old_paragraphs) if n is not None]
+            if old_numberings:
+                md_blocks = parse_markdown_blocks(markdown)
+                has_ul = any(b.get("type") == "ul" for b in md_blocks)
+                has_ol = any(b.get("type") == "ol" for b in md_blocks)
+                if has_ul and not has_ol:
+                    ul_hint = old_numberings[0]
+                elif has_ol and not has_ul:
+                    ol_hint = old_numberings[0]
+                elif has_ul and has_ol:
+                    ul_hint = old_numberings[0]
+                    ol_hint = old_numberings[1] if len(old_numberings) > 1 else old_numberings[0]
+    except Exception:
+        # Hinting is optional; on any issue we continue without numbering hints.
+        ul_hint = None
+        ol_hint = None
+
     # Reuse validation and range selection by calling base op with placeholder paragraph.
     base_result = apply_replace_paragraph_range_op(
         {
@@ -776,9 +843,13 @@ def apply_replace_paragraph_range_markdown_op(op: dict, doc: DocumentObject, par
     else:
         anchor = Paragraph(prev, doc)
 
-    _, inserted_blocks = render_markdown_blocks_after(anchor, markdown)
+    _, inserted_blocks = render_markdown_blocks_after(anchor, markdown, ul_numbering=ul_hint, ol_numbering=ol_hint)
     base_result["op"] = "replace_paragraph_range_markdown"
     base_result["inserted_markdown_blocks"] = inserted_blocks
+    if ul_hint is not None:
+        base_result["ul_numbering_hint"] = {"num_id": ul_hint[0], "level": ul_hint[1]}
+    if ol_hint is not None:
+        base_result["ol_numbering_hint"] = {"num_id": ol_hint[0], "level": ol_hint[1]}
     return base_result
 
 
