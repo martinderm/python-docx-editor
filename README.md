@@ -78,8 +78,10 @@ py -3 scripts/selftest.py
 ## Repository structure
 
 - `scripts/` – executable tools
-- `references/` – quick reference notes
+- `references/` – quick reference notes and spec snippets (start with `references/ooxml-numbering-notes.md` for list/numbering issues)
 - `SKILL.md` – canonical workflow/spec documentation
+
+For numbering/list bugs, prefer Microsoft Learn OpenXML docs as the trusted external source before applying fixes.
 
 ## License
 

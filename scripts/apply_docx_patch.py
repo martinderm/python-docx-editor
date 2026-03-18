@@ -188,6 +188,82 @@ def set_paragraph_numbering(paragraph: Paragraph, num_id: int, ilvl: int = 0) ->
     ppr.append(num_pr)
 
 
+def get_abstract_num_id_for_num_id(anchor: Paragraph, num_id: int) -> int | None:
+    try:
+        root = anchor.part.numbering_part._element  # pylint: disable=protected-access
+        for num in root.findall(qn("w:num")):
+            num_id_raw = num.get(qn("w:numId"))
+            if not num_id_raw or int(num_id_raw) != int(num_id):
+                continue
+            abs_ref = num.find(qn("w:abstractNumId"))
+            if abs_ref is None:
+                return None
+            abs_id_raw = abs_ref.get(qn("w:val"))
+            return int(abs_id_raw) if abs_id_raw is not None else None
+    except Exception:
+        return None
+    return None
+
+
+def numbering_format_for_abstract_num(anchor: Paragraph, abstract_num_id: int) -> str | None:
+    try:
+        root = anchor.part.numbering_part._element  # pylint: disable=protected-access
+        for abstract in root.findall(qn("w:abstractNum")):
+            abs_id_raw = abstract.get(qn("w:abstractNumId"))
+            if not abs_id_raw or int(abs_id_raw) != int(abstract_num_id):
+                continue
+            lvl0 = None
+            for lvl in abstract.findall(qn("w:lvl")):
+                ilvl = lvl.get(qn("w:ilvl"))
+                if ilvl in {"0", None}:
+                    lvl0 = lvl
+                    break
+            if lvl0 is None:
+                return None
+            num_fmt_el = lvl0.find(qn("w:numFmt"))
+            if num_fmt_el is None:
+                return None
+            return num_fmt_el.get(qn("w:val"))
+    except Exception:
+        return None
+    return None
+
+
+def create_numbering_instance(anchor: Paragraph, abstract_num_id: int, *, restart_at_one: bool = False) -> int | None:
+    """Create a fresh w:num for a given abstractNum, returning new numId.
+
+    restart_at_one adds lvlOverride/startOverride=1 for ilvl=0.
+    """
+    try:
+        root = anchor.part.numbering_part._element  # pylint: disable=protected-access
+        max_num_id = 0
+        for num in root.findall(qn("w:num")):
+            raw = num.get(qn("w:numId"))
+            if not raw:
+                continue
+            max_num_id = max(max_num_id, int(raw))
+
+        new_num_id = max_num_id + 1
+        num_el = OxmlElement("w:num")
+        num_el.set(qn("w:numId"), str(new_num_id))
+        abs_ref = OxmlElement("w:abstractNumId")
+        abs_ref.set(qn("w:val"), str(int(abstract_num_id)))
+        num_el.append(abs_ref)
+
+        if restart_at_one:
+            lvl_override = OxmlElement("w:lvlOverride")
+            lvl_override.set(qn("w:ilvl"), "0")
+            start_override = OxmlElement("w:startOverride")
+            start_override.set(qn("w:val"), "1")
+            lvl_override.append(start_override)
+            num_el.append(lvl_override)
+
+        root.append(num_el)
+        return new_num_id
+    except Exception:
+        return None
+
+
 def style_looks_like_list(style_name: str | None) -> bool:
     if not style_name:
         return False
@@ -606,15 +682,105 @@ def parse_markdown_blocks(markdown: str) -> list[dict]:
     return blocks
 
 
+def find_numbering_for_kind(anchor: Paragraph, kind: str) -> tuple[int, int] | None:
+    """Find an existing numbering definition in the document for bullet/decimal lists.
+
+    Returns (num_id, ilvl=0) when possible, otherwise None.
+    For bullets, prefers abstract definitions with a visible lvlText symbol.
+    """
+    wanted = "bullet" if kind == "ul" else "decimal"
+    try:
+        root = anchor.part.numbering_part._element  # pylint: disable=protected-access
+
+        # Map abstractNumId -> (lvl0 numFmt, lvl0 lvlText)
+        abstract_meta: dict[str, tuple[str | None, str | None]] = {}
+        for abstract in root.findall(qn("w:abstractNum")):
+            abs_id = abstract.get(qn("w:abstractNumId"))
+            if not abs_id:
+                continue
+            lvl0 = None
+            for lvl in abstract.findall(qn("w:lvl")):
+                ilvl = lvl.get(qn("w:ilvl"))
+                if ilvl in {"0", None}:
+                    lvl0 = lvl
+                    break
+            if lvl0 is None:
+                continue
+            num_fmt_el = lvl0.find(qn("w:numFmt"))
+            num_fmt_val = num_fmt_el.get(qn("w:val")) if num_fmt_el is not None else None
+            lvl_text_el = lvl0.find(qn("w:lvlText"))
+            lvl_text_val = lvl_text_el.get(qn("w:val")) if lvl_text_el is not None else None
+            abstract_meta[abs_id] = (num_fmt_val, lvl_text_val)
+
+        candidates: list[tuple[int, str, str | None]] = []
+        for num in root.findall(qn("w:num")):
+            num_id_raw = num.get(qn("w:numId"))
+            abs_ref = num.find(qn("w:abstractNumId"))
+            if not num_id_raw or abs_ref is None:
+                continue
+            abs_id = abs_ref.get(qn("w:val"))
+            if not abs_id:
+                continue
+            fmt, lvl_text = abstract_meta.get(abs_id, (None, None))
+            if fmt == wanted:
+                candidates.append((int(num_id_raw), abs_id, lvl_text))
+
+        if not candidates:
+            return None
+
+        if kind == "ul":
+            # Prefer visible bullet glyph definitions; some templates have blank bullet lvlText.
+            visible = [c for c in candidates if (c[2] is not None and c[2].strip() != "")]
+            if visible:
+                return (visible[0][0], 0)
+
+        return (candidates[0][0], 0)
+    except Exception:
+        return None
+
+    return None
+
+
+def numbering_kind_for_num_id(anchor: Paragraph, num_id: int) -> str | None:
+    abs_id = get_abstract_num_id_for_num_id(anchor, num_id)
+    if abs_id is None:
+        return None
+    return numbering_format_for_abstract_num(anchor, abs_id)
+
+
+def fresh_numbering_for_kind(anchor: Paragraph, kind: str) -> tuple[int, int] | None:
+    """Return a fresh numbering instance (new numId) for ul/ol kind.
+
+    For ordered lists, force explicit restart at 1.
+    """
+    base = find_numbering_for_kind(anchor, kind)
+    if base is None:
+        return None
+    abs_id = get_abstract_num_id_for_num_id(anchor, base[0])
+    if abs_id is None:
+        return None
+    new_num_id = create_numbering_instance(anchor, abs_id, restart_at_one=(kind == "ol"))
+    if new_num_id is None:
+        return None
+    return (new_num_id, 0)
+
+
 def render_markdown_blocks_after(
     anchor: Paragraph,
     markdown: str,
     ul_numbering: tuple[int, int] | None = None,
     ol_numbering: tuple[int, int] | None = None,
-) -> tuple[Paragraph, int]:
+    list_mode: str = "auto",
+) -> tuple[Paragraph, int, dict]:
     blocks = parse_markdown_blocks(markdown)
     inserted = 0
     cur = anchor
+    list_stats = {
+        "list_mode": list_mode,
+        "ooxml_fallback_used": False,
+        "ol_restart_forced": False,
+        "ul_fallback_reason": None,
+    }
 
     for b in blocks:
         btype = b.get("type")
@@ -651,11 +817,50 @@ def render_markdown_blocks_after(
         if btype in {"ul", "ol"}:
             style = "List Bullet" if btype == "ul" else "List Number"
             numbering = ul_numbering if btype == "ul" else ol_numbering
+
+            # Validate hint kind (bullet vs decimal). Mismatched hints are ignored.
+            if numbering is not None:
+                hinted_kind = numbering_kind_for_num_id(anchor, numbering[0])
+                wanted_kind = "bullet" if btype == "ul" else "decimal"
+                if hinted_kind != wanted_kind:
+                    numbering = None
+
+            # No hint -> auto-detect by kind from template.
+            if numbering is None:
+                numbering = find_numbering_for_kind(anchor, btype)
+
+            use_numpr = list_mode == "ooxml"
+            if list_mode == "auto" and btype == "ol":
+                # For stable chapter-local numbering, force restart for ordered lists.
+                use_numpr = True
+                list_stats["ol_restart_forced"] = True
+
+            # Ordered lists: if numPr is used, create fresh numbering instance per block.
+            if btype == "ol" and use_numpr:
+                fresh = fresh_numbering_for_kind(anchor, "ol")
+                if fresh is not None:
+                    numbering = fresh
+                    list_stats["ooxml_fallback_used"] = True
+
             for item in b.get("items", []):
                 p = insert_paragraph_after(cur, style=style)
-                if numbering is not None:
-                    set_paragraph_numbering(p, numbering[0], numbering[1])
                 render_inline_markdown(p, item)
+
+                style_name = p.style.name if p.style is not None else None
+                style_ok = style_looks_like_list(style_name)
+
+                if btype == "ul" and list_mode == "auto" and not style_ok:
+                    # Style-only failed (template/style mapping issue) -> fallback to OOXML bullets.
+                    if numbering is None:
+                        numbering = fresh_numbering_for_kind(anchor, "ul") or find_numbering_for_kind(anchor, "ul")
+                    use_numpr = numbering is not None
+                    list_stats["ooxml_fallback_used"] = use_numpr
+                    if use_numpr and list_stats["ul_fallback_reason"] is None:
+                        list_stats["ul_fallback_reason"] = "style_not_list_like"
+
+                if use_numpr and numbering is not None:
+                    set_paragraph_numbering(p, numbering[0], numbering[1])
+
                 cur = p
                 inserted += 1
             continue
@@ -667,7 +872,7 @@ def render_markdown_blocks_after(
         cur = p
         inserted += 1
 
-    return cur, inserted
+    return cur, inserted, list_stats
 
 
 def apply_replace_paragraph_range_op(op: dict, doc: DocumentObject, paragraph_index: dict[str, Paragraph]) -> dict:
@@ -843,9 +1048,16 @@ def apply_replace_paragraph_range_markdown_op(op: dict, doc: DocumentObject, par
     else:
         anchor = Paragraph(prev, doc)
 
-    _, inserted_blocks = render_markdown_blocks_after(anchor, markdown, ul_numbering=ul_hint, ol_numbering=ol_hint)
+    _, inserted_blocks, list_stats = render_markdown_blocks_after(
+        anchor,
+        markdown,
+        ul_numbering=ul_hint,
+        ol_numbering=ol_hint,
+        list_mode="auto",
+    )
     base_result["op"] = "replace_paragraph_range_markdown"
     base_result["inserted_markdown_blocks"] = inserted_blocks
+    base_result["list_handling"] = list_stats
     if ul_hint is not None:
         base_result["ul_numbering_hint"] = {"num_id": ul_hint[0], "level": ul_hint[1]}
     if ol_hint is not None:
