@@ -78,10 +78,25 @@ py -3 scripts/selftest.py
 ## Repository structure
 
 - `scripts/` – executable tools
-- `references/` – quick reference notes and spec snippets (start with `references/ooxml-numbering-notes.md` for list/numbering issues)
+- `references/` – quick reference notes and spec snippets:
+  - `references/ooxml-numbering-notes.md` (OOXML numbering model + restart behavior)
+  - `references/python-docx-list-behavior-notes.md` (official python-docx list/style behavior)
 - `SKILL.md` – canonical workflow/spec documentation
 
 For numbering/list bugs, prefer Microsoft Learn OpenXML docs as the trusted external source before applying fixes.
+
+## Sync to agent skill installation
+
+This repository is the source of truth. After changes, sync tracked/non-ignored files into the agent skill folder (e.g. `boku-martin/skills/python-docx-editor`) so runtime uses the same version.
+
+Example (PowerShell):
+
+```powershell
+git -C C:\Users\dagobert-ai\.openclaw\workspace\projects\python-docx-editor `
+  ls-files --cached --others --exclude-standard
+```
+
+Copy that file list to the target skill directory.
 
 ## License
 
