@@ -77,6 +77,9 @@ Bei Abschnittsverbesserungen:
   - `hybrid` (Fließtext + wenige kompakte Punkte)
   - `preserve-list` (Liste bleibt, sprachlich verbessert)
 - Erzeuge einen zusammenhängenden Patch pro semantischem Block (Range-basiert statt atomisiert).
+- **Dokumentkontext-Regel (verbindlich):** Vor jedem Kapitel-/Teilpatch kurz den Kontext des Gesamtdokuments prüfen (Ziel, Terminologie, wiederkehrende Struktur, Nachbarkapitel), damit lokale Edits global konsistent bleiben.
+- **Kapitelregel (verbindlich):** Bei Patches auf Teilbereiche immer den gesamten Kapitelkontext (`Heading` + alle zugehörigen Content-Absätze bis vor das nächste gleichrangige Heading) prüfen, bevor `start_block_id`/`end_block_id` festgelegt werden.
+- **Lead-in-Regel (verbindlich):** Bei Listen→Fließtext den unmittelbar davorstehenden Lead-in-Absatz (oft kurzer Satz mit `:`) mitprüfen und in die Range aufnehmen, wenn er semantisch im neuen Fließtext aufgeht; keine doppelten Einleitungen stehenlassen.
 - Halte Claim-Abdeckung hoch: Kerninhalte bleiben erhalten, nur Redundanz wird reduziert.
 
 ## JSON Schemas & Contracts
