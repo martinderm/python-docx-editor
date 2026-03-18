@@ -8,6 +8,7 @@ A DOCX editor for AI Agents: lightweight CLI toolkit for safe, reproducible `.do
 - Optionally emit RAG-friendly chunks (`docx-llm-chunks.v1`)
 - Apply block-targeted patches with validation guards
 - Support Markdown-aware writeback (inline + block-level)
+- Fill table rows from JSON with merge-aware handling for inconsistent DOCX cell merges
 
 ## Requirements
 
@@ -42,6 +43,12 @@ Apply patch:
 
 ```bash
 py -3 scripts/apply_docx_patch.py --in input.docx --out output.docx --patch patch.json
+```
+
+Fill merge-variant table rows from JSON spec:
+
+```bash
+py -3 scripts/fill_docx_table_from_json.py --in input.docx --out output.docx --spec rows.json
 ```
 
 Preview helpers:

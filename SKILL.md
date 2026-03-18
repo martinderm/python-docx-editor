@@ -19,7 +19,8 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
    - `memory/references/projects/<project>/...` (falls vorhanden)
    - und nutze sie als Stil-/Terminologie-Quelle (Begriffe, Rollen, formale Benennungen, Tonalität).
 4. Nutze für Standardaufgaben `scripts/docx_ops.py`.
-5. Für Spezialfälle lade `references/python-docx-quickref.md` und implementiere gezielt.
+5. Für Tabellen mit uneinheitlichen Zell-Merges nutze `scripts/fill_docx_table_from_json.py`.
+6. Für Spezialfälle lade `references/python-docx-quickref.md` und implementiere gezielt.
 
 ## Standardbefehle
 
@@ -35,6 +36,8 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
   - `py -3 scripts/extract_docx_for_llm.py --in <in.docx> --out <structure.v2.json> --rag-output <rag.v1.json>`
 - Gezieltes Minimal-Writeback via Patch:
   - `py -3 scripts/apply_docx_patch.py --in <in.docx> --out <out.docx> --patch <patch.json>`
+- Merge-aware Tabellenbefüllung aus JSON-Spec (für inkonsistente Zell-Merges):
+  - `py -3 scripts/fill_docx_table_from_json.py --in <in.docx> --out <out.docx> --spec <rows.json>`
 - Section-/DOCX-Preview für Review:
   - `py -3 scripts/docx_preview.py v2-section --json <structure.v2.json> --title "<Section Title>"`
   - `py -3 scripts/docx_preview.py docx-around --in <out.docx> --contains "<Heading Text>" --lines 25`
@@ -208,7 +211,65 @@ Wenn `--rag-output <pfad>` gesetzt ist, wird zusätzlich ein v1-JSON mit `blocks
 
 ---
 
-### 3) Input-Schema: `apply_docx_patch.py`
+### 3) Input-Schema: `fill_docx_table_from_json.py`
+
+Pflichtparameter:
+- `--in` (Pfad zu bestehender `.docx`)
+- `--out` (Zielpfad für neue `.docx`)
+- `--spec` (Pfad zu JSON-Spec)
+
+Spec-JSON (formal):
+
+```json
+{
+  "type": "object",
+  "required": ["table_index", "rows"],
+  "properties": {
+    "table_index": { "type": "integer", "minimum": 1 },
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["row_index"],
+        "properties": {
+          "row_index": { "type": "integer", "minimum": 1 },
+          "mode": { "type": "string", "enum": ["fill", "clear"], "default": "fill" },
+          "values": {
+            "type": "object",
+            "properties": {
+              "output": { "type": "string" },
+              "risk": { "type": "string" },
+              "factors": { "type": "string" },
+              "mitigation": { "type": "string" },
+              "warning": { "type": "string" }
+            },
+            "additionalProperties": true
+          },
+          "output": { "type": "string" },
+          "risk": { "type": "string" },
+          "factors": { "type": "string" },
+          "mitigation": { "type": "string" },
+          "warning": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+Semantik:
+- `mode: "clear"` leert die Zielzeile (ohne `values`).
+- `mode: "fill"` befüllt die logischen Felder `output|risk|factors|mitigation|warning`.
+- Feldquelle ist bevorzugt `values.{...}`; alternativ direkt auf Row-Level (`output`, `risk`, ...).
+- Merge-Handling pro Zeile automatisch:
+  - erkanntes Merge `3+4` → `mitigation` in Zelle 3, `warning` in Zelle 5
+  - erkanntes Merge `4+5` → `mitigation` in Zelle 3, `warning` in Zelle 4
+  - kein Merge erkannt → Fallback wie `3+4`-Layout
+- Script erwartet mindestens 6 sichtbare Zellen pro Zielzeile.
+
+### 4) Input-Schema: `apply_docx_patch.py`
 
 Pflichtparameter:
 - `--in` (Pfad zu bestehender `.docx`)
@@ -381,7 +442,7 @@ Qualitätsregeln für Listen→Fließtext:
 
 ---
 
-### 4) Failure / Validation Contract (Writeback)
+### 5) Failure / Validation Contract (Writeback)
 
 `apply_docx_patch.py` bricht hart mit Fehler ab, wenn:
 - `block_id` nicht gefunden wird
@@ -429,7 +490,7 @@ Patch nur anwenden, wenn kein Kernclaim ungemappt bleibt.
 1. Umgebung prüfen:
    - `py -3 -m pip install python-docx`
 2. Syntax prüfen:
-   - `py -3 -m py_compile scripts/extract_docx_for_llm.py scripts/apply_docx_patch.py scripts/selftest.py`
+   - `py -3 -m py_compile scripts/extract_docx_for_llm.py scripts/apply_docx_patch.py scripts/fill_docx_table_from_json.py scripts/selftest.py`
 3. End-to-End-Selbsttest (ohne Repo-Artefakte):
    - `py -3 scripts/selftest.py`
 
