@@ -19,7 +19,7 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
    - `memory/references/projects/<project>/...` (falls vorhanden)
    - und nutze sie als Stil-/Terminologie-Quelle (Begriffe, Rollen, formale Benennungen, Tonalität).
 4. Nutze für Standardaufgaben `scripts/docx_ops.py`.
-5. Für Tabellen mit uneinheitlichen Zell-Merges nutze `scripts/fill_docx_table_from_json.py`.
+5. Für generische Tabellenbefüllung auf Zellebene nutze `scripts/fill_docx_table_from_json.py` (`layout: "cell-map"`).
 6. Für Spezialfälle lade `references/python-docx-quickref.md` und implementiere gezielt.
 
 ## Standardbefehle
@@ -36,8 +36,8 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
   - `py -3 scripts/extract_docx_for_llm.py --in <in.docx> --out <structure.v2.json> --rag-output <rag.v1.json>`
 - Gezieltes Minimal-Writeback via Patch:
   - `py -3 scripts/apply_docx_patch.py --in <in.docx> --out <out.docx> --patch <patch.json>`
-- Merge-aware Tabellenbefüllung aus JSON-Spec (für inkonsistente Zell-Merges):
-  - `py -3 scripts/fill_docx_table_from_json.py --in <in.docx> --out <out.docx> --spec <rows.json>`
+- Generische Tabellenbefüllung aus JSON-Spec (cell-map, zellgenau):
+  - `py -3 scripts/fill_docx_table_from_json.py --in <in.docx> --out <out.docx> --spec <cell-map.json>`
 - Section-/DOCX-Preview für Review:
   - `py -3 scripts/docx_preview.py v2-section --json <structure.v2.json> --title "<Section Title>"`
   - `py -3 scripts/docx_preview.py docx-around --in <out.docx> --contains "<Heading Text>" --lines 25`
@@ -218,40 +218,28 @@ Pflichtparameter:
 - `--out` (Zielpfad für neue `.docx`)
 - `--spec` (Pfad zu JSON-Spec)
 
-Spec-JSON (formal):
+Spec-JSON (formal, generischer Modus `cell-map`):
 
 ```json
 {
   "type": "object",
-  "required": ["table_index", "rows"],
+  "required": ["table_index", "cells"],
   "properties": {
     "table_index": { "type": "integer", "minimum": 1 },
-    "rows": {
+    "layout": { "type": "string", "enum": ["cell-map"], "default": "cell-map" },
+    "cells": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["row_index"],
+        "required": ["row", "col"],
         "properties": {
-          "row_index": { "type": "integer", "minimum": 1 },
-          "mode": { "type": "string", "enum": ["fill", "clear"], "default": "fill" },
-          "values": {
-            "type": "object",
-            "properties": {
-              "output": { "type": "string" },
-              "risk": { "type": "string" },
-              "factors": { "type": "string" },
-              "mitigation": { "type": "string" },
-              "warning": { "type": "string" }
-            },
-            "additionalProperties": true
-          },
-          "output": { "type": "string" },
-          "risk": { "type": "string" },
-          "factors": { "type": "string" },
-          "mitigation": { "type": "string" },
-          "warning": { "type": "string" }
+          "row": { "type": "integer", "minimum": 1 },
+          "col": { "type": "integer", "minimum": 1 },
+          "text": { "type": "string", "default": "" },
+          "clear_first": { "type": "boolean", "default": false },
+          "mode": { "type": "string", "enum": ["replace", "append"], "default": "replace" }
         },
-        "additionalProperties": true
+        "additionalProperties": false
       }
     }
   },
@@ -260,14 +248,11 @@ Spec-JSON (formal):
 ```
 
 Semantik:
-- `mode: "clear"` leert die Zielzeile (ohne `values`).
-- `mode: "fill"` befüllt die logischen Felder `output|risk|factors|mitigation|warning`.
-- Feldquelle ist bevorzugt `values.{...}`; alternativ direkt auf Row-Level (`output`, `risk`, ...).
-- Merge-Handling pro Zeile automatisch:
-  - erkanntes Merge `3+4` → `mitigation` in Zelle 3, `warning` in Zelle 5
-  - erkanntes Merge `4+5` → `mitigation` in Zelle 3, `warning` in Zelle 4
-  - kein Merge erkannt → Fallback wie `3+4`-Layout
-- Script erwartet mindestens 6 sichtbare Zellen pro Zielzeile.
+- `table_index`, `row`, `col` sind 1-basiert.
+- `mode: "replace"` setzt den Zellinhalt direkt auf `text`.
+- `mode: "append"` hängt `text` an den bestehenden Zellinhalt an.
+- `clear_first: true` leert die Zielzelle vor `replace/append`.
+- Bei ungültigen Zellkoordinaten, fehlender Tabelle oder falschem Schema bricht das Script mit klarer Fehlermeldung ab.
 
 ### 4) Input-Schema: `apply_docx_patch.py`
 
