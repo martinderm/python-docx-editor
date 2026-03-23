@@ -100,44 +100,25 @@ def main() -> int:
         texts = [" ".join(p.text.split()) for p in d2.paragraphs if p.text and p.text.strip()]
         assert any("Intro sentence for context." in t for t in texts), "Patched text missing"
 
-        # Merge-aware table fill test (mixed merge patterns: 3+4 and 4+5).
+        # Generic table fill test (cell-map).
         table_in = t / "table-in.docx"
         table_out = t / "table-out.docx"
         table_spec = t / "table-spec.json"
 
         td = Document()
-        tt = td.add_table(rows=3, cols=6)
-        for c in range(6):
-            tt.cell(0, c).text = f"H{c + 1}"
-        tt.rows[1].cells[3].merge(tt.rows[1].cells[4])
-        tt.rows[2].cells[4].merge(tt.rows[2].cells[5])
+        tt = td.add_table(rows=3, cols=3)
+        for r in range(3):
+            for c in range(3):
+                tt.cell(r, c).text = f"R{r + 1}C{c + 1}"
         td.save(str(table_in))
 
         spec = {
             "table_index": 1,
-            "rows": [
-                {
-                    "row_index": 2,
-                    "mode": "fill",
-                    "values": {
-                        "output": "O1",
-                        "risk": "R1",
-                        "factors": "F1",
-                        "mitigation": "M1",
-                        "warning": "W1",
-                    },
-                },
-                {
-                    "row_index": 3,
-                    "mode": "fill",
-                    "values": {
-                        "output": "O2",
-                        "risk": "R2",
-                        "factors": "F2",
-                        "mitigation": "M2",
-                        "warning": "W2",
-                    },
-                },
+            "layout": "cell-map",
+            "cells": [
+                {"row": 1, "col": 1, "text": "Top Left"},
+                {"row": 2, "col": 2, "text": "Mid", "mode": "replace"},
+                {"row": 3, "col": 3, "text": " + Appended", "mode": "append"},
             ],
         }
         table_spec.write_text(json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -157,10 +138,10 @@ def main() -> int:
         )
 
         td2 = Document(str(table_out))
-        tr1 = td2.tables[0].rows[1]
-        tr2 = td2.tables[0].rows[2]
-        assert tr1.cells[3].text == "M1" and tr1.cells[5].text == "W1", "merge_3_4 mapping failed"
-        assert tr2.cells[3].text == "M2" and tr2.cells[4].text == "W2", "merge_4_5 mapping failed"
+        tbl = td2.tables[0]
+        assert tbl.rows[0].cells[0].text == "Top Left", "cell-map replace (1,1) failed"
+        assert tbl.rows[1].cells[1].text == "Mid", "cell-map replace (2,2) failed"
+        assert tbl.rows[2].cells[2].text == "R3C3 + Appended", "cell-map append (3,3) failed"
 
     print("selftest: OK")
     return 0

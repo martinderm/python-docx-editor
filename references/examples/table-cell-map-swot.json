@@ -1,0 +1,26 @@
+{
+  "table_index": 1,
+  "layout": "cell-map",
+  "cells": [
+    {
+      "row": 1,
+      "col": 1,
+      "text": "Strengths\n• Klare Governance\n• Erfahrenes Team"
+    },
+    {
+      "row": 1,
+      "col": 2,
+      "text": "Weaknesses\n• Enges Zeitbudget\n• Abhängigkeit von Einzelpersonen"
+    },
+    {
+      "row": 2,
+      "col": 1,
+      "text": "Opportunities\n• Sichtbarkeit erhöhen\n• Skalierbare Prozesse"
+    },
+    {
+      "row": 2,
+      "col": 2,
+      "text": "Threats\n• Ressourcenengpässe\n• Externe Verzögerungen"
+    }
+  ]
+}

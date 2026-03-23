@@ -8,7 +8,7 @@ A DOCX editor for AI Agents: lightweight CLI toolkit for safe, reproducible `.do
 - Optionally emit RAG-friendly chunks (`docx-llm-chunks.v1`)
 - Apply block-targeted patches with validation guards
 - Support Markdown-aware writeback (inline + block-level)
-- Fill table rows from JSON with merge-aware handling for inconsistent DOCX cell merges
+- Fill arbitrary table cells from JSON (`layout: "cell-map"`) for generic matrix/table use cases
 
 ## Requirements
 
@@ -45,11 +45,21 @@ Apply patch:
 py -3 scripts/apply_docx_patch.py --in input.docx --out output.docx --patch patch.json
 ```
 
-Fill merge-variant table rows from JSON spec:
+Fill generic table cells from JSON spec:
 
 ```bash
-py -3 scripts/fill_docx_table_from_json.py --in input.docx --out output.docx --spec rows.json
+py -3 scripts/fill_docx_table_from_json.py --in input.docx --out output.docx --spec cell-map.json
 ```
+
+Example spec (SWOT 2x2):
+
+```bash
+references/examples/table-cell-map-swot.json
+```
+
+Notes:
+- `table_index`, `row`, `col` are 1-based.
+- Optional per-cell flags: `mode` (`replace|append`) and `clear_first` (`true|false`).
 
 Preview helpers:
 

@@ -9,7 +9,8 @@ from typing import Any
 from docx import Document
 
 
-HEADER = ["output", "risk", "factors", "mitigation", "warning"]
+ALLOWED_LAYOUTS = {"cell-map"}
+ALLOWED_MODES = {"replace", "append"}
 
 
 def existing_docx(path_str: str) -> Path:
@@ -31,7 +32,7 @@ def existing_json(path_str: str) -> Path:
 
 
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="Fill DOCX table rows from JSON with merge-aware column handling")
+    ap = argparse.ArgumentParser(description="Fill arbitrary DOCX table cells from JSON spec")
     ap.add_argument("--in", dest="infile", type=existing_docx, required=True)
     ap.add_argument("--out", dest="outfile", type=Path, required=True)
     ap.add_argument("--spec", dest="specfile", type=existing_json, required=True)
@@ -42,82 +43,103 @@ def load_spec(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("Spec muss ein JSON-Objekt sein.")
-    if "table_index" not in data or "rows" not in data:
-        raise ValueError("Spec braucht mindestens 'table_index' und 'rows'.")
-    if not isinstance(data["table_index"], int) or data["table_index"] < 1:
+
+    table_index = data.get("table_index")
+    if not isinstance(table_index, int) or table_index < 1:
         raise ValueError("table_index muss Integer >= 1 sein.")
-    if not isinstance(data["rows"], list):
-        raise ValueError("rows muss eine Liste sein.")
-    return data
 
+    layout = data.get("layout", "cell-map")
+    if layout not in ALLOWED_LAYOUTS:
+        raise ValueError(f"layout muss eines von {sorted(ALLOWED_LAYOUTS)} sein.")
 
-def merged(row, a: int, b: int) -> bool:
-    return row.cells[a]._tc is row.cells[b]._tc
+    cells = data.get("cells")
+    if not isinstance(cells, list):
+        raise ValueError("Für layout='cell-map' muss 'cells' eine Liste sein.")
 
+    normalized_cells: list[dict[str, Any]] = []
+    for i, item in enumerate(cells, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"cells[{i}] muss ein Objekt sein.")
 
-def set_cell(cell, text: str) -> None:
-    cell.text = text
+        row = item.get("row")
+        col = item.get("col")
+        text = item.get("text", "")
+        clear_first = item.get("clear_first", False)
+        mode = item.get("mode", "replace")
 
+        if not isinstance(row, int) or row < 1:
+            raise ValueError(f"cells[{i}].row muss Integer >= 1 sein.")
+        if not isinstance(col, int) or col < 1:
+            raise ValueError(f"cells[{i}].col muss Integer >= 1 sein.")
+        if not isinstance(text, str):
+            raise ValueError(f"cells[{i}].text muss String sein.")
+        if not isinstance(clear_first, bool):
+            raise ValueError(f"cells[{i}].clear_first muss Boolean sein.")
+        if mode not in ALLOWED_MODES:
+            raise ValueError(f"cells[{i}].mode muss eines von {sorted(ALLOWED_MODES)} sein.")
 
-def clear_row(row) -> None:
-    for cell in row.cells:
-        if cell.text:
-            cell.text = ""
-
-
-def normalize_row_payload(item: dict[str, Any]) -> dict[str, str]:
-    if "values" in item:
-        vals = item["values"]
-        if not isinstance(vals, dict):
-            raise ValueError("rows[].values muss ein Objekt sein.")
-        src = vals
-    else:
-        src = item
-
-    out = {}
-    for key in HEADER:
-        val = src.get(key, "")
-        if val is None:
-            val = ""
-        if not isinstance(val, str):
-            raise ValueError(f"rows[].{key} muss String sein.")
-        out[key] = val
-    return out
-
-
-def fill_logical_row_merge_aware(row, values: dict[str, str]) -> dict[str, Any]:
-    # Canonical logical mapping:
-    # 0 output | 1 risk | 2 factors | 3 mitigation | 4 warning? | 5 warning?
-    # Some templates merge 3+4, others merge 4+5.
-    clear_row(row)
-    set_cell(row.cells[0], values["output"])
-    set_cell(row.cells[1], values["risk"])
-    set_cell(row.cells[2], values["factors"])
-
-    if len(row.cells) < 6:
-        raise ValueError("Erwartet mindestens 6 sichtbare Zellen in der Tabellenzeile.")
-
-    merge_34 = merged(row, 3, 4)
-    merge_45 = merged(row, 4, 5)
-
-    if merge_34:
-        set_cell(row.cells[3], values["mitigation"])
-        set_cell(row.cells[5], values["warning"])
-        strategy = "merge_3_4"
-    elif merge_45:
-        set_cell(row.cells[3], values["mitigation"])
-        set_cell(row.cells[4], values["warning"])
-        strategy = "merge_4_5"
-    else:
-        set_cell(row.cells[3], values["mitigation"])
-        set_cell(row.cells[5], values["warning"])
-        strategy = "no_merge_detected"
+        normalized_cells.append(
+            {
+                "row": row,
+                "col": col,
+                "text": text,
+                "clear_first": clear_first,
+                "mode": mode,
+            }
+        )
 
     return {
-        "merge_3_4": merge_34,
-        "merge_4_5": merge_45,
-        "strategy": strategy,
+        "table_index": table_index,
+        "layout": layout,
+        "cells": normalized_cells,
     }
+
+
+def fill_cells(table, cells_spec: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    updated: list[dict[str, Any]] = []
+    row_count = len(table.rows)
+
+    for idx, cell_spec in enumerate(cells_spec, start=1):
+        row_1b = cell_spec["row"]
+        col_1b = cell_spec["col"]
+        text = cell_spec["text"]
+        clear_first = cell_spec["clear_first"]
+        mode = cell_spec["mode"]
+
+        if row_1b > row_count:
+            raise ValueError(f"cells[{idx}] row={row_1b} außerhalb der Tabelle (rows={row_count}).")
+
+        row = table.rows[row_1b - 1]
+        col_count = len(row.cells)
+        if col_1b > col_count:
+            raise ValueError(
+                f"cells[{idx}] col={col_1b} außerhalb der Zeile {row_1b} (cols={col_count})."
+            )
+
+        cell = row.cells[col_1b - 1]
+        before = cell.text or ""
+
+        if clear_first:
+            cell.text = ""
+
+        if mode == "replace":
+            cell.text = text
+        else:  # append
+            base = cell.text or ""
+            cell.text = f"{base}{text}"
+
+        updated.append(
+            {
+                "cell_index": idx,
+                "row": row_1b,
+                "col": col_1b,
+                "mode": mode,
+                "clear_first": clear_first,
+                "changed": before != (cell.text or ""),
+            }
+        )
+
+    return updated
 
 
 def main() -> int:
@@ -128,41 +150,27 @@ def main() -> int:
     table_index = spec["table_index"]
     if len(doc.tables) < table_index:
         raise ValueError(f"Dokument hat nur {len(doc.tables)} Tabellen; table_index={table_index} ist ungültig.")
+
     table = doc.tables[table_index - 1]
-
-    results = []
-    for item in spec["rows"]:
-        if not isinstance(item, dict):
-            raise ValueError("Jeder rows[]-Eintrag muss Objekt sein.")
-        row_index = item.get("row_index")
-        if not isinstance(row_index, int) or row_index < 1:
-            raise ValueError("rows[].row_index muss Integer >= 1 sein.")
-        if row_index > len(table.rows):
-            raise ValueError(f"row_index {row_index} außerhalb der Tabelle (rows={len(table.rows)}).")
-
-        mode = item.get("mode", "fill")
-        if mode not in {"fill", "clear"}:
-            raise ValueError("rows[].mode muss 'fill' oder 'clear' sein.")
-
-        row = table.rows[row_index - 1]
-        if mode == "clear":
-            clear_row(row)
-            results.append({"row_index": row_index, "mode": "clear", "status": "ok"})
-            continue
-
-        values = normalize_row_payload(item)
-        diag = fill_logical_row_merge_aware(row, values)
-        results.append({"row_index": row_index, "mode": "fill", "status": "ok", **diag})
+    updated = fill_cells(table, spec["cells"])
 
     args.outfile.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(args.outfile))
-    print(json.dumps({
-        "in": str(args.infile),
-        "out": str(args.outfile),
-        "table_index": table_index,
-        "rows_processed": len(results),
-        "results": results,
-    }, ensure_ascii=False))
+
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "in": str(args.infile),
+                "out": str(args.outfile),
+                "layout": spec["layout"],
+                "table_index": table_index,
+                "updated_cells": len(updated),
+                "results": updated,
+            },
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 
