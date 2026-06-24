@@ -51,6 +51,12 @@ Fill generic table cells from JSON spec:
 py -3 scripts/fill_docx_table_from_json.py --in input.docx --out output.docx --spec cell-map.json
 ```
 
+Convert Markdown to DOCX:
+
+```bash
+py -3 scripts/markdown_to_docx.py --in input.md --out output.docx
+```
+
 Example spec (SWOT 2x2):
 
 ```bash
