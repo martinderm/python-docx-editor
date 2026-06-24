@@ -17,12 +17,8 @@ from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_BREAK, WD_PARAGRAPH_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.text.paragraph import Paragraph
 from docx.shared import Cm, Pt
-
-
-class MarkdownDocxError(ValueError):
-    pass
+from docx.text.paragraph import Paragraph
 
 
 def existing_markdown(path_str: str) -> Path:
@@ -85,14 +81,6 @@ def configure_document(doc: Document) -> None:
         style.paragraph_format.left_indent = Cm(0.8)
         style.paragraph_format.space_before = Pt(0)
         style.paragraph_format.space_after = Pt(3)
-
-
-
-
-def clear_paragraph_numbering(paragraph: Paragraph) -> None:
-    ppr = paragraph._p.pPr  # pylint: disable=protected-access
-    if ppr is not None and ppr.numPr is not None:
-        ppr.remove(ppr.numPr)
 
 
 def set_paragraph_numbering(paragraph: Paragraph, num_id: int, ilvl: int = 0) -> None:
@@ -197,7 +185,7 @@ def find_numbering_for_kind(anchor: Paragraph, kind: str) -> tuple[int, int] | N
         if not candidates:
             return None
         if kind == "ul":
-            visible = [c for c in candidates if (c[2] is not None and c[2].strip() != "")]
+            visible = [c for c in candidates if c[2] is not None and c[2].strip() != ""]
             if visible:
                 return (visible[0][0], 0)
         return (candidates[0][0], 0)
@@ -219,9 +207,10 @@ def fresh_numbering_for_kind(anchor: Paragraph, kind: str) -> tuple[int, int] | 
 
 
 INLINE_RE = re.compile(r"(\*\*\*.*?\*\*\*|\*\*.*?\*\*|`[^`]+`|\*[^*]+\*)")
+TABLE_ALIGN_RE = re.compile(r"^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$")
 
 
-def add_inline_runs(paragraph, text: str) -> None:
+def add_inline_runs(paragraph: Paragraph, text: str) -> None:
     parts = INLINE_RE.split(text)
     for part in parts:
         if not part:
@@ -243,14 +232,11 @@ def add_inline_runs(paragraph, text: str) -> None:
             paragraph.add_run(part)
 
 
-def add_inline_runs_multiline(paragraph, lines: list[str]) -> None:
+def add_inline_runs_multiline(paragraph: Paragraph, lines: list[str]) -> None:
     for idx, line in enumerate(lines):
         if idx > 0:
             paragraph.add_run().add_break(WD_BREAK.LINE)
         add_inline_runs(paragraph, line)
-
-
-TABLE_ALIGN_RE = re.compile(r"^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$")
 
 
 def is_table_line(line: str) -> bool:
@@ -263,16 +249,16 @@ def split_table_line(line: str) -> list[str]:
 
 
 def set_cell_text(cell, text: str, bold: bool = False) -> None:
-    p = cell.paragraphs[0]
-    p.paragraph_format.space_after = Pt(0)
-    for run in p.runs:
+    paragraph = cell.paragraphs[0]
+    paragraph.paragraph_format.space_after = Pt(0)
+    for run in paragraph.runs:
         run.clear()
-    if not p.runs:
-        run = p.add_run(text)
+    if not paragraph.runs:
+        run = paragraph.add_run(text)
         run.bold = bold
     else:
-        p.runs[0].text = text
-        p.runs[0].bold = bold
+        paragraph.runs[0].text = text
+        paragraph.runs[0].bold = bold
 
 
 def add_table(doc: Document, lines: list[str]) -> None:
@@ -283,31 +269,31 @@ def add_table(doc: Document, lines: list[str]) -> None:
     for row in rows[1:]:
         if len(row) == 1 and TABLE_ALIGN_RE.match(lines[1].strip()):
             continue
-        if all(set(cell) <= set('-: ') for cell in row):
+        if all(set(cell) <= set("-: ") for cell in row):
             continue
         data_rows.append(row)
-    col_count = max(len(r) for r in data_rows)
+    col_count = max(len(row) for row in data_rows)
     table = doc.add_table(rows=len(data_rows), cols=col_count)
     table.style = "Table Grid"
-    for r_idx, row in enumerate(data_rows):
-        for c_idx in range(col_count):
-            text = row[c_idx] if c_idx < len(row) else ""
-            set_cell_text(table.cell(r_idx, c_idx), text, bold=(r_idx == 0))
+    for row_index, row in enumerate(data_rows):
+        for col_index in range(col_count):
+            text = row[col_index] if col_index < len(row) else ""
+            set_cell_text(table.cell(row_index, col_index), text, bold=(row_index == 0))
     doc.add_paragraph("")
 
 
 def add_horizontal_rule(doc: Document) -> None:
-    p = doc.add_paragraph()
-    p.paragraph_format.space_before = Pt(2)
-    p.paragraph_format.space_after = Pt(2)
-    p_borders = OxmlElement("w:pBdr")
+    paragraph = doc.add_paragraph()
+    paragraph.paragraph_format.space_before = Pt(2)
+    paragraph.paragraph_format.space_after = Pt(2)
+    borders = OxmlElement("w:pBdr")
     bottom = OxmlElement("w:bottom")
     bottom.set(qn("w:val"), "single")
     bottom.set(qn("w:sz"), "6")
     bottom.set(qn("w:space"), "1")
     bottom.set(qn("w:color"), "B7B7B7")
-    p_borders.append(bottom)
-    p._p.get_or_add_pPr().append(p_borders)
+    borders.append(bottom)
+    paragraph._p.get_or_add_pPr().append(borders)  # pylint: disable=protected-access
 
 
 def convert_markdown(src: Path, dst: Path) -> None:
@@ -316,21 +302,21 @@ def convert_markdown(src: Path, dst: Path) -> None:
 
     lines = src.read_text(encoding="utf-8").splitlines()
     pending_blank = False
-    i = 0
-    while i < len(lines):
-        raw = lines[i]
+    index = 0
+    while index < len(lines):
+        raw = lines[index]
         stripped = raw.strip()
 
         if not stripped:
             pending_blank = True
-            i += 1
+            index += 1
             continue
 
         if is_table_line(raw):
             table_lines = []
-            while i < len(lines) and is_table_line(lines[i]):
-                table_lines.append(lines[i])
-                i += 1
+            while index < len(lines) and is_table_line(lines[index]):
+                table_lines.append(lines[index])
+                index += 1
             add_table(doc, table_lines)
             pending_blank = False
             continue
@@ -338,48 +324,48 @@ def convert_markdown(src: Path, dst: Path) -> None:
         if stripped == "---":
             add_horizontal_rule(doc)
             pending_blank = False
-            i += 1
+            index += 1
             continue
 
         if stripped.startswith("# "):
-            p = doc.add_paragraph(style="Title")
-            p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            add_inline_runs(p, stripped[2:].strip())
+            paragraph = doc.add_paragraph(style="Title")
+            paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            add_inline_runs(paragraph, stripped[2:].strip())
             pending_blank = False
-            i += 1
+            index += 1
             continue
 
         if stripped.startswith("## "):
-            p = doc.add_paragraph(style="Heading 1")
-            add_inline_runs(p, stripped[3:].strip())
+            paragraph = doc.add_paragraph(style="Heading 1")
+            add_inline_runs(paragraph, stripped[3:].strip())
             pending_blank = False
-            i += 1
+            index += 1
             continue
 
         if stripped.startswith("### "):
-            p = doc.add_paragraph(style="Heading 2")
-            add_inline_runs(p, stripped[4:].strip())
+            paragraph = doc.add_paragraph(style="Heading 2")
+            add_inline_runs(paragraph, stripped[4:].strip())
             pending_blank = False
-            i += 1
+            index += 1
             continue
 
         if stripped.startswith("> "):
-            p = doc.add_paragraph(style="Markdown Quote")
-            add_inline_runs(p, stripped[2:].strip())
+            paragraph = doc.add_paragraph(style="Markdown Quote")
+            add_inline_runs(paragraph, stripped[2:].strip())
             pending_blank = False
-            i += 1
+            index += 1
             continue
 
         number_match = re.match(r"^(\d+)\.\s+(.*)$", stripped)
         if number_match:
             items = []
-            while i < len(lines):
-                current = lines[i].strip()
+            while index < len(lines):
+                current = lines[index].strip()
                 current_match = re.match(r"^(\d+)\.\s+(.*)$", current)
                 if not current_match:
                     break
                 items.append(current_match.group(2).strip())
-                i += 1
+                index += 1
             anchor = doc.add_paragraph()
             anchor.paragraph_format.space_before = Pt(0)
             anchor.paragraph_format.space_after = Pt(0)
@@ -388,53 +374,53 @@ def convert_markdown(src: Path, dst: Path) -> None:
             if parent is not None:
                 parent.remove(anchor._element)
             for item in items:
-                p = doc.add_paragraph(style="List Number")
-                add_inline_runs(p, item)
+                paragraph = doc.add_paragraph(style="List Number")
+                add_inline_runs(paragraph, item)
                 if numbering is not None:
-                    set_paragraph_numbering(p, numbering[0], numbering[1])
+                    set_paragraph_numbering(paragraph, numbering[0], numbering[1])
             pending_blank = False
             continue
 
         if stripped.startswith("* ") or stripped.startswith("- "):
             items = []
-            while i < len(lines):
-                current = lines[i].strip()
+            while index < len(lines):
+                current = lines[index].strip()
                 if not (current.startswith("* ") or current.startswith("- ")):
                     break
                 items.append(current[2:].strip())
-                i += 1
+                index += 1
             for item in items:
-                p = doc.add_paragraph(style="List Bullet")
-                add_inline_runs(p, item)
+                paragraph = doc.add_paragraph(style="List Bullet")
+                add_inline_runs(paragraph, item)
             pending_blank = False
             continue
 
         paragraph_lines = [raw.strip()]
-        i += 1
-        while i < len(lines):
-            nxt_raw = lines[i]
-            nxt = nxt_raw.strip()
-            if not nxt:
+        index += 1
+        while index < len(lines):
+            next_raw = lines[index]
+            next_stripped = next_raw.strip()
+            if not next_stripped:
                 break
             if (
-                nxt.startswith("# ")
-                or nxt.startswith("## ")
-                or nxt.startswith("### ")
-                or nxt.startswith("> ")
-                or nxt.startswith("* ")
-                or nxt.startswith("- ")
-                or re.match(r"^(\d+)\.\s+", nxt)
-                or nxt == "---"
-                or is_table_line(lines[i])
+                next_stripped.startswith("# ")
+                or next_stripped.startswith("## ")
+                or next_stripped.startswith("### ")
+                or next_stripped.startswith("> ")
+                or next_stripped.startswith("* ")
+                or next_stripped.startswith("- ")
+                or re.match(r"^(\d+)\.\s+", next_stripped)
+                or next_stripped == "---"
+                or is_table_line(lines[index])
             ):
                 break
-            paragraph_lines.append(nxt_raw.strip())
-            i += 1
+            paragraph_lines.append(next_raw.strip())
+            index += 1
 
-        p = doc.add_paragraph()
+        paragraph = doc.add_paragraph()
         if pending_blank:
-            p.paragraph_format.space_before = Pt(4)
-        add_inline_runs_multiline(p, paragraph_lines)
+            paragraph.paragraph_format.space_before = Pt(4)
+        add_inline_runs_multiline(paragraph, paragraph_lines)
         pending_blank = False
 
     dst.parent.mkdir(parents=True, exist_ok=True)

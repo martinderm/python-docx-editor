@@ -38,6 +38,8 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
   - `py -3 scripts/apply_docx_patch.py --in <in.docx> --out <out.docx> --patch <patch.json>`
 - Generische Tabellenbefüllung aus JSON-Spec (cell-map, zellgenau):
   - `py -3 scripts/fill_docx_table_from_json.py --in <in.docx> --out <out.docx> --spec <cell-map.json>`
+- Markdown nach DOCX konvertieren (einfacher, reproduzierbarer Draft-Workflow):
+  - `py -3 scripts/markdown_to_docx.py --in <in.md> --out <out.docx>`
 - Section-/DOCX-Preview für Review:
   - `py -3 scripts/docx_preview.py v2-section --json <structure.v2.json> --title "<Section Title>"`
   - `py -3 scripts/docx_preview.py docx-around --in <out.docx> --contains "<Heading Text>" --lines 25`
