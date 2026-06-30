@@ -502,3 +502,9 @@ Vor Veröffentlichung sicherstellen:
 - `replace` in `docx_ops.py` ist bewusst einfach und kann Formatierung beeinflussen.
 - `apply_docx_patch.py` ist minimal-sicher: bei Run-Grenzkonflikten wird verweigert statt riskant umgeschrieben.
 - Für formatkritische Änderungen auf Run-Ebene arbeiten statt `paragraph.text` komplett neu zu setzen.
+
+## Windows PDF export
+
+- DOCX als PDF �ber Microsoft Word exportieren (derzeit nur Windows):
+  - powershell -ExecutionPolicy Bypass -File scripts/export_docx_to_pdf.ps1 -InputPath <in.docx> -OutputPath <out.pdf>
+- Voraussetzung: lokal installiertes Microsoft Word, da der Export die Word-COM-Schnittstelle verwendet.

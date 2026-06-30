@@ -128,3 +128,15 @@ GNU General Public License v3.0 (GPL-3.0). See `LICENSE`.
 ## Status
 
 Project is focused on practical CLI workflows and LLM-assisted editing pipelines.
+
+## Windows PDF export
+
+Export DOCX to PDF via Microsoft Word on Windows:
+
+`powershell
+powershell -ExecutionPolicy Bypass -File scripts/export_docx_to_pdf.ps1 -InputPath input.docx -OutputPath output.pdf
+`
+
+Notes:
+- This export path currently works only on Windows.
+- It requires a local Microsoft Word installation because it uses the Word COM interface.
