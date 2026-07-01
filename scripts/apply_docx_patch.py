@@ -546,6 +546,8 @@ def insert_paragraph_after(paragraph: Paragraph, style: str | None = None) -> Pa
             new_para.style = style
         except Exception:
             pass
+    if paragraph.paragraph_format.left_indent is not None:
+        new_para.paragraph_format.left_indent = paragraph.paragraph_format.left_indent
     return new_para
 
 
@@ -580,9 +582,15 @@ def insert_table_after(paragraph: Paragraph, rows: list[list[str]], table_style:
     tbl.getparent().remove(tbl)
     paragraph._p.addnext(tbl)  # pylint: disable=protected-access
 
+    if paragraph.paragraph_format.left_indent is not None:
+        table.left_indent = paragraph.paragraph_format.left_indent
+
     after = OxmlElement("w:p")
     tbl.addnext(after)
-    return Paragraph(after, paragraph._parent)  # pylint: disable=protected-access
+    after_para = Paragraph(after, paragraph._parent)  # pylint: disable=protected-access
+    if paragraph.paragraph_format.left_indent is not None:
+        after_para.paragraph_format.left_indent = paragraph.paragraph_format.left_indent
+    return after_para
 
 
 def parse_markdown_blocks(markdown: str) -> list[dict]:
