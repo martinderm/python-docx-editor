@@ -145,6 +145,17 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
             index += 1
             continue
             
+        # Page breaks (Method 2: \pagebreak or \newpage)
+        if stripped in {"\\pagebreak", "\\newpage"}:
+            if metadata_items:
+                add_metadata_table(doc, metadata_items)
+                metadata_items = []
+                in_metadata = False
+                doc.add_paragraph("")
+            doc.add_page_break()
+            index += 1
+            continue
+            
         # 1. Headings
         if stripped.startswith("# "):
             if metadata_items:
