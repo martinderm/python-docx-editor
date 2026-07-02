@@ -583,7 +583,13 @@ def insert_table_after(paragraph: Paragraph, rows: list[list[str]], table_style:
     paragraph._p.addnext(tbl)  # pylint: disable=protected-access
 
     if paragraph.paragraph_format.left_indent is not None:
-        table.left_indent = paragraph.paragraph_format.left_indent
+        tblPr = table._tbl.tblPr
+        tblInd = tblPr.find(qn("w:tblInd"))
+        if tblInd is None:
+            tblInd = OxmlElement("w:tblInd")
+            tblPr.append(tblInd)
+        tblInd.set(qn("w:w"), str(int(paragraph.paragraph_format.left_indent.twips)))
+        tblInd.set(qn("w:type"), "dxa")
 
     after = OxmlElement("w:p")
     tbl.addnext(after)

@@ -17,6 +17,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt, RGBColor
 from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 
 # Regular expressions for inline formatting
 INLINE_RE = re.compile(r"(\*\*\*.*?\*\*\*|\*\*.*?\*\*|`[^`]+`|\*[^*]+\*)")
@@ -59,7 +60,26 @@ def set_cell_text(cell, text: str, bold: bool = False, header: bool = False) -> 
             run.font.color.rgb = RGBColor(0x00, 0x45, 0x7D)
             run.bold = True
 
-def add_table(doc: Document, lines: list[str]) -> None:
+def set_table_indentation(table, indent_dxa: int) -> None:
+    if indent_dxa <= 0:
+        return
+    tblPr = table._tbl.tblPr
+    tblInd = tblPr.find(qn('w:tblInd'))
+    if tblInd is not None:
+        tblPr.remove(tblInd)
+    tblInd = OxmlElement('w:tblInd')
+    tblInd.set(qn('w:w'), str(indent_dxa))
+    tblInd.set(qn('w:type'), 'dxa')
+    tblPr.append(tblInd)
+
+def apply_paragraph_indent(p, default_left_indent, is_list: bool = False) -> None:
+    if default_left_indent is not None:
+        if is_list:
+            p.paragraph_format.left_indent = default_left_indent + Pt(18)
+        else:
+            p.paragraph_format.left_indent = default_left_indent
+
+def add_table(doc: Document, lines: list[str], indent_dxa: int = 0) -> None:
     rows = []
     for line in lines:
         stripped = line.strip()
@@ -84,6 +104,7 @@ def add_table(doc: Document, lines: list[str]) -> None:
     col_count = max(len(r) for r in cleaned_rows)
     table = doc.add_table(rows=len(cleaned_rows), cols=col_count)
     table.style = "Table Grid"
+    set_table_indentation(table, indent_dxa)
     
     # Make table look elegant
     for r_idx, row_data in enumerate(cleaned_rows):
@@ -92,9 +113,10 @@ def add_table(doc: Document, lines: list[str]) -> None:
             is_header = (r_idx == 0)
             set_cell_text(table.cell(r_idx, c_idx), text, bold=is_header, header=is_header)
 
-def add_metadata_table(doc: Document, items: list[tuple[str, str]]) -> None:
+def add_metadata_table(doc: Document, items: list[tuple[str, str]], indent_dxa: int = 0) -> None:
     table = doc.add_table(rows=len(items), cols=2)
     table.style = "Table Grid"
+    set_table_indentation(table, indent_dxa)
     
     # Column 0: Key (bold, blue)
     # Column 1: Value (normal)
@@ -107,9 +129,10 @@ def add_metadata_table(doc: Document, items: list[tuple[str, str]]) -> None:
         # Style value
         set_cell_text(cell_val, value.strip(), bold=False, header=False)
 
-def add_callout_box(doc: Document, text: str) -> None:
+def add_callout_box(doc: Document, text: str, indent_dxa: int = 0) -> None:
     table = doc.add_table(rows=1, cols=1)
     table.style = "Table Grid"
+    set_table_indentation(table, indent_dxa)
     cell = table.cell(0, 0)
     set_cell_text(cell, text.strip(), bold=False, header=False)
     # Highlight block text
@@ -129,6 +152,27 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
         raise FileNotFoundError(f"Template not found at: {template_path}")
         
     doc = Document(str(template_path))
+    
+    # Read default left indents from template before clearing it
+    default_left_indent = None
+    default_table_indent_dxa = 0
+    
+    for p in doc.paragraphs:
+        if p.paragraph_format.left_indent is not None:
+            default_left_indent = p.paragraph_format.left_indent
+            break
+            
+    for t in doc.tables:
+        tblInd = t._tbl.tblPr.find(qn('w:tblInd'))
+        if tblInd is not None:
+            val = tblInd.get(qn('w:w'))
+            if val:
+                try:
+                    default_table_indent_dxa = int(val)
+                except ValueError:
+                    pass
+                break
+                
     clear_doc_body(doc)
     
     lines = md_path.read_text(encoding="utf-8").splitlines()
@@ -148,7 +192,7 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
         # Page breaks (Method 2: \pagebreak or \newpage)
         if stripped in {"\\pagebreak", "\\newpage"}:
             if metadata_items:
-                add_metadata_table(doc, metadata_items)
+                add_metadata_table(doc, metadata_items, default_table_indent_dxa)
                 metadata_items = []
                 in_metadata = False
                 doc.add_paragraph("")
@@ -159,7 +203,7 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
         # 1. Headings
         if stripped.startswith("# "):
             if metadata_items:
-                add_metadata_table(doc, metadata_items)
+                add_metadata_table(doc, metadata_items, default_table_indent_dxa)
                 metadata_items = []
                 in_metadata = False
                 doc.add_paragraph("")
@@ -174,7 +218,7 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
             
         if stripped.startswith("## "):
             if metadata_items:
-                add_metadata_table(doc, metadata_items)
+                add_metadata_table(doc, metadata_items, default_table_indent_dxa)
                 metadata_items = []
                 doc.add_paragraph("")
                 
@@ -184,18 +228,20 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
             else:
                 in_metadata = False
                 
-            doc.add_heading(heading_text, level=1)
+            h = doc.add_heading(heading_text, level=1)
+            apply_paragraph_indent(h, default_left_indent)
             index += 1
             continue
             
         if stripped.startswith("### "):
             if metadata_items:
-                add_metadata_table(doc, metadata_items)
+                add_metadata_table(doc, metadata_items, default_table_indent_dxa)
                 metadata_items = []
                 doc.add_paragraph("")
             in_metadata = False
             heading_text = stripped[4:].strip()
-            doc.add_heading(heading_text, level=2)
+            h = doc.add_heading(heading_text, level=2)
+            apply_paragraph_indent(h, default_left_indent)
             index += 1
             continue
 
@@ -208,7 +254,7 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
                     text_line = text_line.split("]", 1)[1].strip()
                 blockquote_lines.append(text_line)
                 index += 1
-            add_callout_box(doc, " ".join(blockquote_lines))
+            add_callout_box(doc, " ".join(blockquote_lines), default_table_indent_dxa)
             doc.add_paragraph("")
             continue
             
@@ -218,7 +264,7 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
             while index < len(lines) and lines[index].strip().startswith("|"):
                 table_lines.append(lines[index])
                 index += 1
-            add_table(doc, table_lines)
+            add_table(doc, table_lines, default_table_indent_dxa)
             doc.add_paragraph("")
             continue
             
@@ -250,7 +296,8 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
                         metadata_items.append((item_text.strip(), ""))
             else:
                 for item_text, style_name in list_items:
-                    doc.add_paragraph(item_text, style=style_name)
+                    p = doc.add_paragraph(item_text, style=style_name)
+                    apply_paragraph_indent(p, default_left_indent, is_list=True)
                 doc.add_paragraph("")
             continue
             
@@ -272,11 +319,12 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
             index += 1
             
         p = doc.add_paragraph()
+        apply_paragraph_indent(p, default_left_indent)
         add_inline_runs(p, " ".join(para_lines))
         doc.add_paragraph("")
         
     if metadata_items:
-        add_metadata_table(doc, metadata_items)
+        add_metadata_table(doc, metadata_items, default_table_indent_dxa)
         doc.add_paragraph("")
         
     docx_path.parent.mkdir(parents=True, exist_ok=True)
