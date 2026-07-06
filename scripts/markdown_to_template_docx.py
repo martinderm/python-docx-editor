@@ -228,8 +228,9 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
             else:
                 in_metadata = False
                 
-            h = doc.add_heading(heading_text, level=1)
+            h = doc.add_heading("", level=1)
             apply_paragraph_indent(h, default_left_indent)
+            add_inline_runs(h, heading_text)
             index += 1
             continue
             
@@ -240,8 +241,9 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
                 doc.add_paragraph("")
             in_metadata = False
             heading_text = stripped[4:].strip()
-            h = doc.add_heading(heading_text, level=2)
+            h = doc.add_heading("", level=2)
             apply_paragraph_indent(h, default_left_indent)
+            add_inline_runs(h, heading_text)
             index += 1
             continue
 
@@ -296,8 +298,9 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
                         metadata_items.append((item_text.strip(), ""))
             else:
                 for item_text, style_name in list_items:
-                    p = doc.add_paragraph(item_text, style=style_name)
+                    p = doc.add_paragraph(style=style_name)
                     apply_paragraph_indent(p, default_left_indent, is_list=True)
+                    add_inline_runs(p, item_text)
                 doc.add_paragraph("")
             continue
             

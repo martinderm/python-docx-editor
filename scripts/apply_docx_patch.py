@@ -67,6 +67,54 @@ def parse_table_block_id(block_id: str) -> tuple[int, int, int] | None:
     return int(m.group(1)), int(m.group(2)), int(m.group(3))
 
 
+def replace_run_with_markdown(paragraph: Paragraph, run: Paragraph, old: str, new: str) -> int:
+    import copy
+    parts = run.text.split(old)
+    parent = run._r.getparent()
+    new_xml_runs = []
+    
+    for idx, part in enumerate(parts):
+        if part:
+            r_part = copy.deepcopy(run._r)
+            for t in r_part.findall(qn("w:t")):
+                r_part.remove(t)
+            t_node = OxmlElement("w:t")
+            t_node.text = part
+            r_part.append(t_node)
+            new_xml_runs.append(r_part)
+            
+        if idx < len(parts) - 1:
+            temp_doc = Document()
+            temp_p = temp_doc.add_paragraph()
+            render_inline_markdown(temp_p, new)
+            
+            for temp_run in temp_p.runs:
+                r_md = copy.deepcopy(run._r)
+                for t in r_md.findall(qn("w:t")):
+                    r_md.remove(t)
+                t_node = OxmlElement("w:t")
+                t_node.text = temp_run.text
+                r_md.append(t_node)
+                
+                rPr = r_md.get_or_add_rPr()
+                if temp_run.bold:
+                    rPr.get_or_add_b().set(qn("w:val"), "true")
+                    rPr.get_or_add_bCs().set(qn("w:val"), "true")
+                if temp_run.italic:
+                    rPr.get_or_add_i().set(qn("w:val"), "true")
+                    rPr.get_or_add_iCs().set(qn("w:val"), "true")
+                if temp_run.font.name:
+                    rPr.get_or_add_rFonts().set(qn("w:ascii"), temp_run.font.name)
+                    
+                new_xml_runs.append(r_md)
+                
+    pos = parent.index(run._r)
+    for new_r in reversed(new_xml_runs):
+        parent.insert(pos, new_r)
+    parent.remove(run._r)
+    return len(parts) - 1
+
+
 def replace_in_runs(paragraph: Paragraph, old: str, new: str) -> ReplaceResult:
     res = ReplaceResult()
     if not old:
@@ -78,8 +126,14 @@ def replace_in_runs(paragraph: Paragraph, old: str, new: str) -> ReplaceResult:
 
     res.matches = para_text.count(old)
 
-    for run in paragraph.runs:
-        if old in run.text:
+    run_indices = [idx for idx, run in enumerate(paragraph.runs) if old in run.text]
+    for idx in reversed(run_indices):
+        run = paragraph.runs[idx]
+        has_md = ("**" in new) or ("*" in new) or ("`" in new) or (("[" in new and "]" in new and "(" in new and ")" in new))
+        if has_md:
+            c = replace_run_with_markdown(paragraph, run, old, new)
+            res.changes += c
+        else:
             c = run.text.count(old)
             run.text = run.text.replace(old, new)
             res.changes += c
@@ -347,12 +401,23 @@ def render_inline_markdown(paragraph: Paragraph, text: str) -> None:
             run = paragraph.add_run(_unescape_md(earliest_match.group(1)))
             run.bold = True
             run.italic = True
+            rPr = run._r.get_or_add_rPr()
+            rPr.get_or_add_b().set(qn("w:val"), "true")
+            rPr.get_or_add_bCs().set(qn("w:val"), "true")
+            rPr.get_or_add_i().set(qn("w:val"), "true")
+            rPr.get_or_add_iCs().set(qn("w:val"), "true")
         elif earliest_kind == "bold":
             run = paragraph.add_run(_unescape_md(earliest_match.group(1)))
             run.bold = True
+            rPr = run._r.get_or_add_rPr()
+            rPr.get_or_add_b().set(qn("w:val"), "true")
+            rPr.get_or_add_bCs().set(qn("w:val"), "true")
         elif earliest_kind == "italic":
             run = paragraph.add_run(_unescape_md(earliest_match.group(1)))
             run.italic = True
+            rPr = run._r.get_or_add_rPr()
+            rPr.get_or_add_i().set(qn("w:val"), "true")
+            rPr.get_or_add_iCs().set(qn("w:val"), "true")
         elif earliest_kind == "code":
             run = paragraph.add_run(_unescape_md(earliest_match.group(1)))
             run.font.name = "Consolas"
