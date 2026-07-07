@@ -30,6 +30,8 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
   - `py -3 scripts/docx_ops.py stats --in <datei.docx>`
 - Einfache Ersetzung in Absätzen + Tabellen:
   - `py -3 scripts/docx_ops.py replace --in <in.docx> --out <out.docx> --find "Alt" --replace "Neu"`
+- Word-Kommentare, Revisions-History (Insertions, Deletions) und farbige Markierungen auslesen:
+  - `py -3 scripts/docx_ops.py inspect --in <datei.docx> [--json]`
 - LLM-freundliche Extraktion (v2, hierarchisch nach Sections/Content):
   - `py -3 scripts/extract_docx_for_llm.py --in <in.docx> --out <structure.v2.json>`
 - Optionaler RAG-Output (v1, flat blocks+chunks):

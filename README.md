@@ -45,6 +45,12 @@ Apply patch:
 py -3 scripts/apply_docx_patch.py --in input.docx --out output.docx --patch patch.json
 ```
 
+Inspect comments, revisions, and highlights:
+
+```bash
+py -3 scripts/docx_ops.py inspect --in input.docx [--json]
+```
+
 Fill generic table cells from JSON spec:
 
 ```bash
