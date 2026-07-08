@@ -42,6 +42,8 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
   - `py -3 scripts/fill_docx_table_from_json.py --in <in.docx> --out <out.docx> --spec <cell-map.json>`
 - Markdown nach DOCX konvertieren (einfacher, reproduzierbarer Draft-Workflow):
   - `py -3 scripts/markdown_to_docx.py --in <in.md> --out <out.docx>`
+- DOCX nach Markdown konvertieren (generische Konvertierung mit Erhalt von Fett-/Kursivschrift und Tabellen):
+  - `py -3 scripts/docx_to_markdown.py --in <in.docx> --out <out.md>`
 - Section-/DOCX-Preview für Review:
   - `py -3 scripts/docx_preview.py v2-section --json <structure.v2.json> --title "<Section Title>"`
   - `py -3 scripts/docx_preview.py docx-around --in <out.docx> --contains "<Heading Text>" --lines 25`
