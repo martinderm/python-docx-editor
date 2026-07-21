@@ -14,6 +14,8 @@ import sys
 import re
 from pathlib import Path
 from docx import Document
+from docx.enum.section import WD_ORIENT, WD_SECTION
+from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt, RGBColor
 from docx.oxml.ns import qn
@@ -147,11 +149,48 @@ def clear_doc_body(doc: Document) -> None:
             continue
         body.remove(child)
 
-def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path) -> None:
+
+def ensure_required_styles(doc: Document) -> None:
+    for style_name in ("List Bullet", "List Number"):
+        if style_name not in doc.styles:
+            style = doc.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+            style.base_style = doc.styles["Normal"]
+            style.font.name = "Aptos"
+            style.font.size = Pt(11)
+            style.paragraph_format.space_after = Pt(3)
+    if "Table Grid" not in doc.styles:
+        doc.styles.add_style("Table Grid", WD_STYLE_TYPE.TABLE)
+
+def set_section_layout(section, source_layout, orientation) -> None:
+    page_width, page_height, top_margin, bottom_margin, left_margin, right_margin = source_layout
+    section.orientation = orientation
+    if orientation == WD_ORIENT.LANDSCAPE:
+        section.page_width = page_height
+        section.page_height = page_width
+    else:
+        section.page_width = page_width
+        section.page_height = page_height
+    section.top_margin = top_margin
+    section.bottom_margin = bottom_margin
+    section.left_margin = left_margin
+    section.right_margin = right_margin
+
+
+def has_content_after(lines: list[str], index: int) -> bool:
+    return any(line.strip() for line in lines[index:])
+
+
+def convert_markdown_to_docx(
+    md_path: Path,
+    docx_path: Path,
+    template_path: Path,
+    table_orientation: str = "portrait",
+) -> None:
     if not template_path.exists():
         raise FileNotFoundError(f"Template not found at: {template_path}")
         
     doc = Document(str(template_path))
+    ensure_required_styles(doc)
     
     # Read default left indents from template before clearing it
     default_left_indent = None
@@ -173,6 +212,15 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
                     pass
                 break
                 
+    source_section = doc.sections[0]
+    source_layout = (
+        source_section.page_width,
+        source_section.page_height,
+        source_section.top_margin,
+        source_section.bottom_margin,
+        source_section.left_margin,
+        source_section.right_margin,
+    )
     clear_doc_body(doc)
     
     lines = md_path.read_text(encoding="utf-8").splitlines()
@@ -266,8 +314,20 @@ def convert_markdown_to_docx(md_path: Path, docx_path: Path, template_path: Path
             while index < len(lines) and lines[index].strip().startswith("|"):
                 table_lines.append(lines[index])
                 index += 1
+            if table_orientation == "landscape":
+                set_section_layout(
+                    doc.add_section(WD_SECTION.NEW_PAGE),
+                    source_layout,
+                    WD_ORIENT.LANDSCAPE,
+                )
             add_table(doc, table_lines, default_table_indent_dxa)
             doc.add_paragraph("")
+            if table_orientation == "landscape" and has_content_after(lines, index):
+                set_section_layout(
+                    doc.add_section(WD_SECTION.NEW_PAGE),
+                    source_layout,
+                    WD_ORIENT.PORTRAIT,
+                )
             continue
             
         # 4. Lists (Bullet & Numbered)
@@ -339,6 +399,12 @@ def main() -> int:
     parser.add_argument("--in", dest="infile", required=True, help="Input Markdown file")
     parser.add_argument("--out", dest="outfile", required=True, help="Output DOCX file")
     parser.add_argument("--template", dest="template", help="Word template file (.docx)")
+    parser.add_argument(
+        "--table-orientation",
+        choices=("portrait", "landscape"),
+        default="portrait",
+        help="Page orientation for Markdown tables (default: portrait)",
+    )
     args = parser.parse_args()
     
     infile = Path(args.infile)
@@ -351,7 +417,7 @@ def main() -> int:
         template = Path(__file__).parent.parent / "templates" / "GenericTemplate.docx"
         
     try:
-        convert_markdown_to_docx(infile, outfile, template)
+        convert_markdown_to_docx(infile, outfile, template, args.table_orientation)
         return 0
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

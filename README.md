@@ -66,7 +66,7 @@ py -3 scripts/markdown_to_docx.py --in input.md --out output.docx
 Convert Markdown to DOCX using a styled Word template (preserves headers, footers, page size, margins, and styles):
 
 ```bash
-py -3 scripts/markdown_to_template_docx.py --in input.md --out output.docx [--template my_template.docx]
+py -3 scripts/markdown_to_template_docx.py --in input.md --out output.docx [--template my_template.docx] [--table-orientation portrait|landscape]
 ```
 
 Example spec (SWOT 2x2):
