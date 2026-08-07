@@ -22,28 +22,77 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
 # Regular expressions for inline formatting
-INLINE_RE = re.compile(r"(\*\*\*.*?\*\*\*|\*\*.*?\*\*|`[^`]+`|\*[^*]+\*)")
+INLINE_RE = re.compile(
+    r"(\[\s*[^\]]+\s*\]\([^\)]+\)|\*\*\*.*?\*\*\*|\*\*.*?\*\*|`[^`]+`|\*[^*]+\*)"
+)
 
-def add_inline_runs(paragraph, text: str) -> None:
+def add_hyperlink(paragraph, url: str, text: str, color: str = "0563C1", underline: bool = True) -> None:
+    """Adds a clickable native Word hyperlink to a paragraph."""
+    part = paragraph.part
+    r_id = part.relate_to(url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", is_external=True)
+
+    hyperlink = OxmlElement('w:hyperlink')
+    hyperlink.set(qn('r:id'), r_id)
+
+    new_run = OxmlElement('w:r')
+    rPr = OxmlElement('w:rPr')
+
+    if color:
+        c = OxmlElement('w:color')
+        c.set(qn('w:val'), color)
+        rPr.append(c)
+
+    if underline:
+        u = OxmlElement('w:u')
+        u.set(qn('w:val'), 'single')
+        rPr.append(u)
+
+    new_run.append(rPr)
+    text_el = OxmlElement('w:t')
+    text_el.text = text
+    new_run.append(text_el)
+    hyperlink.append(new_run)
+    paragraph._p.append(hyperlink)
+
+def add_inline_runs(paragraph, text: str, default_font_color: RGBColor | None = None) -> None:
     parts = INLINE_RE.split(text)
     for part in parts:
         if not part:
             continue
-        if part.startswith("***") and part.endswith("***"):
+        if part.startswith("[") and "](" in part and part.endswith(")"):
+            m = re.match(r"^\[(.*?)\]\((.*?)\)$", part)
+            if m:
+                link_text, url = m.groups()
+                add_hyperlink(paragraph, url, link_text)
+            else:
+                run = paragraph.add_run(part)
+                if default_font_color:
+                    run.font.color.rgb = default_font_color
+        elif part.startswith("***") and part.endswith("***"):
             run = paragraph.add_run(part[3:-3])
             run.bold = True
             run.italic = True
+            if default_font_color:
+                run.font.color.rgb = default_font_color
         elif part.startswith("**") and part.endswith("**"):
             run = paragraph.add_run(part[2:-2])
             run.bold = True
+            if default_font_color:
+                run.font.color.rgb = default_font_color
         elif part.startswith("*") and part.endswith("*"):
             run = paragraph.add_run(part[1:-1])
             run.italic = True
+            if default_font_color:
+                run.font.color.rgb = default_font_color
         elif part.startswith("`") and part.endswith("`"):
             run = paragraph.add_run(part[1:-1])
             run.font.name = "Consolas"
+            run.font.size = Pt(9.5)
+            run.font.color.rgb = RGBColor(0x33, 0x33, 0x33)
         else:
-            paragraph.add_run(part)
+            run = paragraph.add_run(part)
+            if default_font_color:
+                run.font.color.rgb = default_font_color
 
 def set_cell_text(cell, text: str, bold: bool = False, header: bool = False) -> None:
     paragraph = cell.paragraphs[0]
