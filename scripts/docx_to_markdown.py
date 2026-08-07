@@ -63,6 +63,24 @@ def paragraph_to_markdown(p: Paragraph) -> str:
 
     p_style = p.style.name if p.style else ""
     is_bullet = raw_text.startswith("\u2022") or raw_text.startswith("•") or "bullet" in p_style.lower()
+    is_number = "number" in p_style.lower()
+
+    ilvl = 0
+    numPr = p._p.xpath(".//w:numPr")
+    if numPr:
+        ilvl_el = numPr[0].find(qn("w:ilvl"))
+        if ilvl_el is not None and ilvl_el.get(qn("w:val")):
+            try:
+                ilvl = int(ilvl_el.get(qn("w:val")))
+            except ValueError:
+                pass
+    elif p.paragraph_format.left_indent is not None:
+        try:
+            indent_pt = p.paragraph_format.left_indent.pt
+            if indent_pt > 18:
+                ilvl = max(0, int((indent_pt - 18) // 18) + 1)
+        except Exception:
+            pass
 
     run_texts = []
     for child in p._p:
@@ -109,10 +127,14 @@ def paragraph_to_markdown(p: Paragraph) -> str:
     if not para_md and raw_text:
         para_md = raw_text
 
+    indent_str = "  " * ilvl
     if is_bullet:
         if para_md.startswith("\u2022") or para_md.startswith("•"):
             para_md = para_md[1:].strip()
-        return f"- {para_md}"
+        return f"{indent_str}- {para_md}"
+
+    if is_number:
+        return f"{indent_str}1. {para_md}"
 
     if p_style.startswith("Heading 1"):
         return f"# {para_md}"

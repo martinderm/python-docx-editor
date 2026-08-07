@@ -14,8 +14,11 @@ Supports:
 from __future__ import annotations
 
 import argparse
+import base64
+import io
 import re
 import sys
+import urllib.request
 from pathlib import Path
 
 from docx import Document
@@ -492,7 +495,60 @@ def add_callout_box(doc: Document, lines: list[str]) -> None:
     p_after.paragraph_format.space_after = Pt(4)
 
 
+def render_mermaid_diagram_to_png(mermaid_code: str, timeout: int = 8) -> bytes | None:
+    cleaned_code = mermaid_code.strip()
+    if not cleaned_code:
+        return None
+
+    try:
+        req = urllib.request.Request(
+            "https://kroki.io/mermaid/png",
+            data=cleaned_code.encode("utf-8"),
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status == 200:
+                data = resp.read()
+                if len(data) > 100:
+                    return data
+    except Exception:
+        pass
+
+    try:
+        encoded = base64.b64encode(cleaned_code.encode("utf-8")).decode("utf-8")
+        url = f"https://mermaid.ink/img/{encoded}"
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status == 200:
+                data = resp.read()
+                if len(data) > 100:
+                    return data
+    except Exception:
+        pass
+
+    return None
+
+
 def add_code_block(doc: Document, code_lines: list[str], lang: str = "") -> None:
+    if lang.strip().lower() in {"mermaid", "diagram"}:
+        mermaid_code = "\n".join(code_lines)
+        png_bytes = render_mermaid_diagram_to_png(mermaid_code)
+        if png_bytes:
+            p_img = doc.add_paragraph()
+            p_img.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            p_img.paragraph_format.space_before = Pt(8)
+            p_img.paragraph_format.space_after = Pt(4)
+            run = p_img.add_run()
+            run.add_picture(io.BytesIO(png_bytes), width=Cm(15))
+
+            p_after = doc.add_paragraph()
+            p_after.paragraph_format.space_before = Pt(0)
+            p_after.paragraph_format.space_after = Pt(6)
+            return
+
     table = doc.add_table(rows=1, cols=1)
     table.style = "Table Grid"
     table.autofit = False
@@ -662,6 +718,28 @@ def add_horizontal_rule(doc: Document) -> None:
     paragraph._p.get_or_add_pPr().append(borders)  # pylint: disable=protected-access
 
 
+def parse_list_line(raw_line: str) -> tuple[str, int, str] | None:
+    if not raw_line or not raw_line.strip():
+        return None
+
+    expanded = raw_line.expandtabs(4)
+    lstripped = expanded.lstrip()
+    if not lstripped:
+        return None
+
+    leading_spaces = len(expanded) - len(lstripped)
+    ilvl = min(leading_spaces // 2, 4)
+
+    if lstripped.startswith("* ") or lstripped.startswith("- ") or lstripped.startswith("+ "):
+        return ("ul", ilvl, lstripped[2:].strip())
+
+    m = re.match(r"^(\d+)\.\s+(.*)$", lstripped)
+    if m:
+        return ("ol", ilvl, m.group(2).strip())
+
+    return None
+
+
 def convert_markdown(src: Path, dst: Path) -> None:
     doc = Document()
     configure_document(doc)
@@ -747,42 +825,44 @@ def convert_markdown(src: Path, dst: Path) -> None:
             pending_blank = False
             continue
 
-        number_match = re.match(r"^(\d+)\.\s+(.*)$", stripped)
-        if number_match:
-            items = []
+        parsed_first = parse_list_line(raw)
+        if parsed_first is not None:
+            list_items = []
             while index < len(lines):
-                current = lines[index].strip()
-                current_match = re.match(r"^(\d+)\.\s+(.*)$", current)
-                if not current_match:
+                parsed = parse_list_line(lines[index])
+                if parsed is None:
+                    if not lines[index].strip() and index + 1 < len(lines):
+                        peek_parsed = parse_list_line(lines[index + 1])
+                        if peek_parsed is not None:
+                            index += 1
+                            continue
                     break
-                items.append(current_match.group(2).strip())
+                list_items.append(parsed)
                 index += 1
+
             anchor = doc.add_paragraph()
             anchor.paragraph_format.space_before = Pt(0)
             anchor.paragraph_format.space_after = Pt(0)
-            numbering = fresh_numbering_for_kind(anchor, "ol") or find_numbering_for_kind(anchor, "ol")
+            ol_numbering = fresh_numbering_for_kind(anchor, "ol") or find_numbering_for_kind(anchor, "ol")
+            ul_numbering = find_numbering_for_kind(anchor, "ul")
             parent = anchor._element.getparent()
             if parent is not None:
                 parent.remove(anchor._element)
-            for item in items:
-                paragraph = doc.add_paragraph(style="List Number")
-                add_inline_runs(paragraph, item)
-                if numbering is not None:
-                    set_paragraph_numbering(paragraph, numbering[0], numbering[1])
-            pending_blank = False
-            continue
 
-        if stripped.startswith("* ") or stripped.startswith("- "):
-            items = []
-            while index < len(lines):
-                current = lines[index].strip()
-                if not (current.startswith("* ") or current.startswith("- ")):
-                    break
-                items.append(current[2:].strip())
-                index += 1
-            for item in items:
-                paragraph = doc.add_paragraph(style="List Bullet")
-                add_inline_runs(paragraph, item)
+            for kind, ilvl, item_text in list_items:
+                style_name = "List Bullet" if kind == "ul" else "List Number"
+                paragraph = doc.add_paragraph(style=style_name)
+                paragraph.paragraph_format.space_before = Pt(0)
+                paragraph.paragraph_format.space_after = Pt(2)
+                paragraph.paragraph_format.left_indent = Pt(18 * (ilvl + 1))
+
+                if kind == "ol" and ol_numbering is not None:
+                    set_paragraph_numbering(paragraph, ol_numbering[0], ilvl)
+                elif kind == "ul" and ul_numbering is not None:
+                    set_paragraph_numbering(paragraph, ul_numbering[0], ilvl)
+
+                add_inline_runs(paragraph, item_text)
+
             pending_blank = False
             continue
 

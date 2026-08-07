@@ -10,14 +10,17 @@ Usage:
 """
 
 import argparse
-import sys
+import base64
+import io
 import re
+import sys
+import urllib.request
 from pathlib import Path
 from docx import Document
 from docx.enum.section import WD_ORIENT, WD_SECTION
 from docx.enum.style import WD_STYLE_TYPE
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
+from docx.shared import Cm, Pt, RGBColor
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
@@ -180,6 +183,92 @@ def add_metadata_table(doc: Document, items: list[tuple[str, str]], indent_dxa: 
         # Style value
         set_cell_text(cell_val, value.strip(), bold=False, header=False)
 
+def render_mermaid_diagram_to_png(mermaid_code: str, timeout: int = 8) -> bytes | None:
+    cleaned_code = mermaid_code.strip()
+    if not cleaned_code:
+        return None
+
+    try:
+        req = urllib.request.Request(
+            "https://kroki.io/mermaid/png",
+            data=cleaned_code.encode("utf-8"),
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status == 200:
+                data = resp.read()
+                if len(data) > 100:
+                    return data
+    except Exception:
+        pass
+
+    try:
+        encoded = base64.b64encode(cleaned_code.encode("utf-8")).decode("utf-8")
+        url = f"https://mermaid.ink/img/{encoded}"
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status == 200:
+                data = resp.read()
+                if len(data) > 100:
+                    return data
+    except Exception:
+        pass
+
+    return None
+
+
+def add_code_block(doc: Document, code_lines: list[str], lang: str = "", indent_dxa: int = 0) -> None:
+    if lang.strip().lower() in {"mermaid", "diagram"}:
+        mermaid_code = "\n".join(code_lines)
+        png_bytes = render_mermaid_diagram_to_png(mermaid_code)
+        if png_bytes:
+            p_img = doc.add_paragraph()
+            p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p_img.paragraph_format.space_before = Pt(8)
+            p_img.paragraph_format.space_after = Pt(4)
+            run = p_img.add_run()
+            run.add_picture(io.BytesIO(png_bytes), width=Cm(15))
+            doc.add_paragraph("")
+            return
+
+    table = doc.add_table(rows=1, cols=1)
+    table.style = "Table Grid"
+    set_table_indentation(table, indent_dxa)
+    cell = table.cell(0, 0)
+    
+    tcPr = cell._tc.get_or_add_tcPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), "F6F8FA")
+    tcPr.append(shd)
+
+    p = cell.paragraphs[0]
+    p.paragraph_format.space_before = Pt(2)
+    p.paragraph_format.space_after = Pt(2)
+
+    if lang:
+        lbl = p.add_run(f"// Code block: {lang}\n")
+        lbl.font.name = "Consolas"
+        lbl.font.size = Pt(8.5)
+        lbl.font.color.rgb = RGBColor(0x6A, 0x73, 0x7D)
+
+    full_code = "\n".join(code_lines)
+    lines = full_code.split("\n")
+    for idx, line in enumerate(lines):
+        if idx > 0:
+            p.add_run().add_break(WD_BREAK.LINE)
+        run = p.add_run(line)
+        run.font.name = "Consolas"
+        run.font.size = Pt(9.5)
+        run.font.color.rgb = RGBColor(0x24, 0x29, 0x2E)
+
+    doc.add_paragraph("")
+
+
 def add_callout_box(doc: Document, text: str, indent_dxa: int = 0) -> None:
     table = doc.add_table(rows=1, cols=1)
     table.style = "Table Grid"
@@ -295,6 +384,24 @@ def convert_markdown_to_docx(
                 doc.add_paragraph("")
             doc.add_page_break()
             index += 1
+            continue
+
+        # Code blocks & Mermaid diagrams
+        if stripped.startswith("```"):
+            if metadata_items:
+                add_metadata_table(doc, metadata_items, default_table_indent_dxa)
+                metadata_items = []
+                in_metadata = False
+                doc.add_paragraph("")
+            lang = stripped[3:].strip()
+            code_lines = []
+            index += 1
+            while index < len(lines) and not lines[index].strip().startswith("```"):
+                code_lines.append(lines[index])
+                index += 1
+            if index < len(lines) and lines[index].strip().startswith("```"):
+                index += 1
+            add_code_block(doc, code_lines, lang=lang, indent_dxa=default_table_indent_dxa)
             continue
             
         # 1. Headings
