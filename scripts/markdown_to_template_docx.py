@@ -318,6 +318,50 @@ def has_content_after(lines: list[str], index: int) -> bool:
     return any(line.strip() for line in lines[index:])
 
 
+def strip_yaml_front_matter(lines: list[str]) -> list[str]:
+    """Remove optional leading YAML front matter from Markdown input.
+
+    A leading horizontal rule remains document content unless it is paired with a
+    closing ``---`` line. This avoids rendering metadata such as ``title:`` or
+    ``project_slug:`` as visible document text.
+    """
+    if not lines or lines[0].strip() != "---":
+        return lines
+
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            return lines[index + 1 :]
+    return lines
+
+
+def heading_followed_by_table(
+    lines: list[str], index: int
+) -> tuple[int, str, int] | None:
+    """Return a level-2/3 heading and the following table start, if adjacent."""
+    stripped = lines[index].strip()
+    if stripped.startswith("## "):
+        level, heading_text = 1, stripped[3:].strip()
+    elif stripped.startswith("### "):
+        level, heading_text = 2, stripped[4:].strip()
+    else:
+        return None
+
+    table_index = index + 1
+    while table_index < len(lines) and not lines[table_index].strip():
+        table_index += 1
+
+    if table_index < len(lines) and lines[table_index].strip().startswith("|"):
+        return level, heading_text, table_index
+    return None
+
+
+def next_block_is_heading_table(lines: list[str], index: int) -> bool:
+    """Return whether the next substantive block is a heading directly above a table."""
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+    return index < len(lines) and heading_followed_by_table(lines, index) is not None
+
+
 def convert_markdown_to_docx(
     md_path: Path,
     docx_path: Path,
@@ -361,7 +405,7 @@ def convert_markdown_to_docx(
     )
     clear_doc_body(doc)
     
-    lines = md_path.read_text(encoding="utf-8").splitlines()
+    lines = strip_yaml_front_matter(md_path.read_text(encoding="utf-8").splitlines())
     
     index = 0
     in_metadata = False
@@ -373,6 +417,47 @@ def convert_markdown_to_docx(
         
         if not stripped:
             index += 1
+            continue
+
+        # A heading immediately followed by a table belongs to the same visual
+        # unit. In landscape mode, add both after the landscape section break so
+        # Word does not leave a portrait page containing only that heading.
+        adjacent_heading_table = (
+            heading_followed_by_table(lines, index)
+            if table_orientation == "landscape"
+            else None
+        )
+        if adjacent_heading_table is not None:
+            if metadata_items:
+                add_metadata_table(doc, metadata_items, default_table_indent_dxa)
+                metadata_items = []
+                doc.add_paragraph("")
+            in_metadata = False
+
+            heading_level, heading_text, table_start = adjacent_heading_table
+            set_section_layout(
+                doc.add_section(WD_SECTION.NEW_PAGE),
+                source_layout,
+                WD_ORIENT.LANDSCAPE,
+            )
+            heading = doc.add_heading("", level=heading_level)
+            apply_paragraph_indent(heading, default_left_indent)
+            add_inline_runs(heading, heading_text)
+
+            table_lines = []
+            index = table_start
+            while index < len(lines) and lines[index].strip().startswith("|"):
+                table_lines.append(lines[index])
+                index += 1
+            add_table(doc, table_lines, default_table_indent_dxa)
+            doc.add_paragraph("")
+
+            if has_content_after(lines, index) and not next_block_is_heading_table(lines, index):
+                set_section_layout(
+                    doc.add_section(WD_SECTION.NEW_PAGE),
+                    source_layout,
+                    WD_ORIENT.PORTRAIT,
+                )
             continue
             
         # Page breaks (Method 2: \pagebreak or \newpage)

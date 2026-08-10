@@ -42,11 +42,21 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
   - `py -3 scripts/fill_docx_table_from_json.py --in <in.docx> --out <out.docx> --spec <cell-map.json>`
 - Markdown nach DOCX konvertieren (einfacher, reproduzierbarer Draft-Workflow):
   - `py -3 scripts/markdown_to_docx.py --in <in.md> --out <out.docx>`
+- Markdown nach DOCX auf Basis einer Word-Vorlage konvertieren (erhält Kopf-/Fußzeilen, Seitenformat, Ränder und Styles):
+  - `py -3 scripts/markdown_to_template_docx.py --in <in.md> --out <out.docx> [--template <vorlage.docx>] [--table-orientation portrait|landscape]`
 - DOCX nach Markdown konvertieren (generische Konvertierung mit Erhalt von Fett-/Kursivschrift und Tabellen):
   - `py -3 scripts/docx_to_markdown.py --in <in.docx> --out <out.md>`
 - Section-/DOCX-Preview für Review:
   - `py -3 scripts/docx_preview.py v2-section --json <structure.v2.json> --title "<Section Title>"`
   - `py -3 scripts/docx_preview.py docx-around --in <out.docx> --contains "<Heading Text>" --lines 25`
+
+### Markdown-Konvertierung: Front Matter und Tabellenorientierung
+
+- Beide Markdown-Konverter überspringen optionales YAML Front Matter am Dateianfang (`---` … `---`), damit Metadaten wie `title:` oder `project_slug:` nicht als sichtbarer Dokumenttext ausgegeben werden. Ein einzelnes, nicht geschlossenes `---` bleibt eine reguläre Markdown-Trennlinie.
+- `markdown_to_docx.py` erzeugt ein eigenständiges, formatiertes DOCX im Hochformat.
+- Für vorlagenbasierte Dokumente oder Tabellen im Querformat nutze `markdown_to_template_docx.py`.
+- Mit `--table-orientation landscape` wird eine Überschrift der Ebene 2 oder 3, auf die direkt (Leerzeilen erlaubt) eine Markdown-Tabelle folgt, gemeinsam mit der Tabelle im Querformat platziert. Das vermeidet Seiten, die nur eine Überschrift enthalten.
+- Folgen mehrere solcher Überschrift-Tabellen-Blöcke direkt aufeinander, wird zwischen ihnen keine leere Hochformatseite eingefügt. Nach anschließendem Fließtext kehrt das Dokument ins Hochformat der Vorlage zurück.
 
 ## LLM-Default Editing Procedure (verbindlich)
 
@@ -481,7 +491,7 @@ Patch nur anwenden, wenn kein Kernclaim ungemappt bleibt.
 1. Umgebung prüfen:
    - `py -3 -m pip install python-docx`
 2. Syntax prüfen:
-   - `py -3 -m py_compile scripts/extract_docx_for_llm.py scripts/apply_docx_patch.py scripts/fill_docx_table_from_json.py scripts/selftest.py`
+   - `py -3 -m py_compile scripts/extract_docx_for_llm.py scripts/apply_docx_patch.py scripts/fill_docx_table_from_json.py scripts/markdown_to_docx.py scripts/markdown_to_template_docx.py scripts/selftest.py`
 3. End-to-End-Selbsttest (ohne Repo-Artefakte):
    - `py -3 scripts/selftest.py`
 
@@ -493,6 +503,7 @@ Vor Veröffentlichung sicherstellen:
 - [ ] Optionaler v1-RAG-Output funktioniert via `--rag-output`
 - [ ] `apply_docx_patch.py` validiert `expected_matches` und blockiert Run-Grenzkonflikte
 - [ ] `SKILL.md`-Schemas entsprechen dem tatsächlichen CLI-Verhalten
+- [ ] Markdown-Konverter überspringen YAML Front Matter und platzieren Überschrift-Tabellen-Blöcke im Querformat ohne Überschrift-Alleinseite
 - [ ] Keine Testartefakte versehentlich versioniert (lokale Dateien bleiben in `Tests/`)
 
 ## Versioning Notes
@@ -509,6 +520,6 @@ Vor Veröffentlichung sicherstellen:
 
 ## Windows PDF export
 
-- DOCX als PDF �ber Microsoft Word exportieren (derzeit nur Windows):
+- DOCX als PDF über Microsoft Word exportieren (derzeit nur Windows):
   - powershell -ExecutionPolicy Bypass -File scripts/export_docx_to_pdf.ps1 -InputPath <in.docx> -OutputPath <out.pdf>
 - Voraussetzung: lokal installiertes Microsoft Word, da der Export die Word-COM-Schnittstelle verwendet.

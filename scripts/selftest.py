@@ -17,16 +17,28 @@ import tempfile
 from pathlib import Path
 
 from docx import Document
+from docx.oxml.ns import qn
 
 
 ROOT = Path(__file__).resolve().parents[1]
 EXTRACT = ROOT / "scripts" / "extract_docx_for_llm.py"
 PATCH = ROOT / "scripts" / "apply_docx_patch.py"
 FILL_TABLE = ROOT / "scripts" / "fill_docx_table_from_json.py"
+MARKDOWN_TO_DOCX = ROOT / "scripts" / "markdown_to_docx.py"
+MARKDOWN_TO_TEMPLATE_DOCX = ROOT / "scripts" / "markdown_to_template_docx.py"
+GENERIC_TEMPLATE = ROOT / "templates" / "GenericTemplate.docx"
 
 
 def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=str(cwd), text=True, capture_output=True, check=True)
+
+
+def body_element_text(element) -> str:
+    return "".join(node.text or "" for node in element.iter(qn("w:t")))
+
+
+def has_section_break(element) -> bool:
+    return element.find(f".//{qn('w:sectPr')}") is not None
 
 
 def main() -> int:
@@ -142,6 +154,88 @@ def main() -> int:
         assert tbl.rows[0].cells[0].text == "Top Left", "cell-map replace (1,1) failed"
         assert tbl.rows[1].cells[1].text == "Mid", "cell-map replace (2,2) failed"
         assert tbl.rows[2].cells[2].text == "R3C3 + Appended", "cell-map append (3,3) failed"
+
+        # Markdown converters must suppress leading YAML front matter.
+        markdown_in = t / "report.md"
+        markdown_out = t / "report.docx"
+        markdown_in.write_text(
+            "---\n"
+            "title: Internal report metadata\n"
+            "project_slug: test-project\n"
+            "---\n\n"
+            "# Visible title\n\n"
+            "Visible body text.\n",
+            encoding="utf-8",
+        )
+        run(
+            [sys.executable, str(MARKDOWN_TO_DOCX), "--in", str(markdown_in), "--out", str(markdown_out)],
+            ROOT,
+        )
+        markdown_doc = Document(str(markdown_out))
+        markdown_text = "\n".join(p.text for p in markdown_doc.paragraphs)
+        assert "Visible title" in markdown_text, "Markdown title missing"
+        assert "Visible body text." in markdown_text, "Markdown body missing"
+        assert "project_slug:" not in markdown_text, "YAML front matter was rendered"
+
+        # In landscape-table mode, a directly preceding heading must be added
+        # after the landscape section break rather than on a portrait-only page.
+        template_in = t / "landscape-report.md"
+        template_out = t / "landscape-report.docx"
+        template_in.write_text(
+            "---\n"
+            "title: Internal report metadata\n"
+            "---\n\n"
+            "# Visible title\n\n"
+            "## Risks\n\n"
+            "| Area | Risk |\n"
+            "| --- | --- |\n"
+            "| Delivery | Limited funding |\n\n"
+            "## Actions\n\n"
+            "| Owner | Action |\n"
+            "| --- | --- |\n"
+            "| Team | Confirm funding |\n\n"
+            "## Closing\n\n"
+            "Visible closing text.\n",
+            encoding="utf-8",
+        )
+        run(
+            [
+                sys.executable,
+                str(MARKDOWN_TO_TEMPLATE_DOCX),
+                "--in",
+                str(template_in),
+                "--out",
+                str(template_out),
+                "--template",
+                str(GENERIC_TEMPLATE),
+                "--table-orientation",
+                "landscape",
+            ],
+            ROOT,
+        )
+        template_doc = Document(str(template_out))
+        template_text = "\n".join(p.text for p in template_doc.paragraphs)
+        assert "Visible title" in template_text, "Template title missing"
+        assert "Visible closing text." in template_text, "Template body missing"
+        assert "title: Internal report metadata" not in template_text, "Template YAML front matter was rendered"
+        assert len(template_doc.tables) == 2, "Expected two landscape tables"
+
+        body_children = list(template_doc.element.body)
+        for heading_text in ("Risks", "Actions"):
+            heading_index = next(
+                index
+                for index, child in enumerate(body_children)
+                if child.tag == qn("w:p") and body_element_text(child).strip() == heading_text
+            )
+            table_index = next(
+                index
+                for index in range(heading_index + 1, len(body_children))
+                if body_children[index].tag == qn("w:tbl")
+            )
+            assert not any(
+                has_section_break(child)
+                for child in body_children[heading_index + 1 : table_index]
+            ), f"Section break inserted between '{heading_text}' and its table"
 
     print("selftest: OK")
     return 0

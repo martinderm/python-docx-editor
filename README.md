@@ -8,6 +8,7 @@ A DOCX editor for AI Agents: lightweight CLI toolkit for safe, reproducible `.do
 - Optionally emit RAG-friendly chunks (`docx-llm-chunks.v1`)
 - Apply block-targeted patches with validation guards
 - Support Markdown-aware writeback (inline + block-level)
+- Convert Markdown to standalone or template-based DOCX files, including optional landscape tables
 - Fill arbitrary table cells from JSON (`layout: "cell-map"`) for generic matrix/table use cases
 
 ## Requirements
@@ -63,11 +64,15 @@ Convert Markdown to DOCX:
 py -3 scripts/markdown_to_docx.py --in input.md --out output.docx
 ```
 
+Both Markdown converters skip optional leading YAML front matter (`---` … `---`), so document metadata is not rendered as visible text. A standalone `---` without a closing marker remains a normal Markdown horizontal rule.
+
 Convert Markdown to DOCX using a styled Word template (preserves headers, footers, page size, margins, and styles):
 
 ```bash
 py -3 scripts/markdown_to_template_docx.py --in input.md --out output.docx [--template my_template.docx] [--table-orientation portrait|landscape]
 ```
+
+With `--table-orientation landscape`, an H2/H3 heading immediately followed by a Markdown table (blank lines allowed) is placed with that table on the landscape page. Consecutive heading-table blocks do not create an empty portrait page between them; subsequent prose returns to the template's portrait layout.
 
 Example spec (SWOT 2x2):
 

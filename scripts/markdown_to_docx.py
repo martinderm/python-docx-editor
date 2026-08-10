@@ -77,6 +77,21 @@ def existing_markdown(path_str: str) -> Path:
     return path
 
 
+def strip_yaml_front_matter(lines: list[str]) -> list[str]:
+    """Remove optional leading YAML front matter from Markdown input.
+
+    A leading horizontal rule remains content unless it is paired with a closing
+    ``---`` line, so regular Markdown documents keep their intended rule.
+    """
+    if not lines or lines[0].strip() != "---":
+        return lines
+
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            return lines[index + 1 :]
+    return lines
+
+
 def configure_document(doc: Document) -> None:
     section = doc.sections[0]
     section.top_margin = Cm(2.2)
@@ -744,7 +759,7 @@ def convert_markdown(src: Path, dst: Path) -> None:
     doc = Document()
     configure_document(doc)
 
-    lines = src.read_text(encoding="utf-8").splitlines()
+    lines = strip_yaml_front_matter(src.read_text(encoding="utf-8").splitlines())
     pending_blank = False
     index = 0
     while index < len(lines):
