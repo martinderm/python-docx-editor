@@ -1,6 +1,6 @@
 # python-docx – Listenverhalten (Kurznotizen)
 
-Stand: 2026-03-18
+Stand: 2026-08-11
 
 ## Was die offizielle python-docx-Doku klar zeigt
 
@@ -19,6 +19,7 @@ Stand: 2026-03-18
 - Deshalb kombinieren wir:
   - python-docx Style-Setzung (`List Bullet`/`List Number`) **plus**
   - direkte OOXML-Nummerierungssteuerung (`w:numPr`, eigene `w:num`-Instanz, ggf. Override).
+- Bei Markdown→DOCX erhält jeder getrennte OL-Block eine eigene `w:num`-Instanz mit `startOverride=1`; eine gemeinsame Instanz darf nicht dokumentweit wiederverwendet werden.
 
 So vermeiden wir:
 - fehlende Bullet-Symbole in UL,

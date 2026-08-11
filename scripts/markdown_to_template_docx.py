@@ -28,6 +28,7 @@ from docx.oxml import OxmlElement
 INLINE_RE = re.compile(
     r"(\[\s*[^\]]+\s*\]\([^\)]+\)|\*\*\*.*?\*\*\*|\*\*.*?\*\*|`[^`]+`|\*[^*]+\*)"
 )
+HTML_BREAK_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 
 def add_hyperlink(paragraph, url: str, text: str, color: str = "0563C1", underline: bool = True) -> None:
     """Adds a clickable native Word hyperlink to a paragraph."""
@@ -57,7 +58,7 @@ def add_hyperlink(paragraph, url: str, text: str, color: str = "0563C1", underli
     hyperlink.append(new_run)
     paragraph._p.append(hyperlink)
 
-def add_inline_runs(paragraph, text: str, default_font_color: RGBColor | None = None) -> None:
+def _add_inline_runs_segment(paragraph, text: str, default_font_color: RGBColor | None = None) -> None:
     parts = INLINE_RE.split(text)
     for part in parts:
         if not part:
@@ -96,6 +97,120 @@ def add_inline_runs(paragraph, text: str, default_font_color: RGBColor | None = 
             run = paragraph.add_run(part)
             if default_font_color:
                 run.font.color.rgb = default_font_color
+
+
+def add_inline_runs(paragraph, text: str, default_font_color: RGBColor | None = None) -> None:
+    """Add inline Markdown and convert HTML-style ``<br>`` tags to Word breaks."""
+    for index, segment in enumerate(HTML_BREAK_RE.split(text)):
+        if index > 0:
+            paragraph.add_run().add_break(WD_BREAK.LINE)
+        _add_inline_runs_segment(paragraph, segment, default_font_color)
+
+
+def set_paragraph_numbering(paragraph, num_id: int, ilvl: int = 0) -> None:
+    """Assign an explicit OOXML numbering instance to a paragraph."""
+    p_pr = paragraph._p.get_or_add_pPr()
+    if p_pr.numPr is not None:
+        p_pr.remove(p_pr.numPr)
+
+    num_pr = OxmlElement("w:numPr")
+    ilvl_el = OxmlElement("w:ilvl")
+    ilvl_el.set(qn("w:val"), str(ilvl))
+    num_id_el = OxmlElement("w:numId")
+    num_id_el.set(qn("w:val"), str(num_id))
+    num_pr.append(ilvl_el)
+    num_pr.append(num_id_el)
+    p_pr.append(num_pr)
+
+
+def add_numbering_definition(doc: Document, kind: str) -> int:
+    """Create a visible bullet or restarting decimal numbering instance.
+
+    A fresh decimal instance is used for every Markdown ordered-list block so
+    Word cannot continue numbering from an earlier block. Abstract definitions
+    are inserted before all ``w:num`` elements because Word expects that OOXML
+    ordering and may otherwise repair or ignore the definition.
+    """
+    if kind not in {"bullet", "decimal"}:
+        raise ValueError(f"Unsupported numbering kind: {kind}")
+
+    root = doc.part.numbering_part._element
+    abstract_ids = [
+        int(raw)
+        for element in root.findall(qn("w:abstractNum"))
+        if (raw := element.get(qn("w:abstractNumId"))) is not None
+    ]
+    num_ids = [
+        int(raw)
+        for element in root.findall(qn("w:num"))
+        if (raw := element.get(qn("w:numId"))) is not None
+    ]
+    abstract_id = max(abstract_ids, default=-1) + 1
+    num_id = max(num_ids, default=0) + 1
+
+    abstract = OxmlElement("w:abstractNum")
+    abstract.set(qn("w:abstractNumId"), str(abstract_id))
+    multi_level_type = OxmlElement("w:multiLevelType")
+    multi_level_type.set(qn("w:val"), "singleLevel")
+    abstract.append(multi_level_type)
+
+    level = OxmlElement("w:lvl")
+    level.set(qn("w:ilvl"), "0")
+    start = OxmlElement("w:start")
+    start.set(qn("w:val"), "1")
+    level.append(start)
+    num_fmt = OxmlElement("w:numFmt")
+    num_fmt.set(qn("w:val"), kind)
+    level.append(num_fmt)
+    level_text = OxmlElement("w:lvlText")
+    level_text.set(qn("w:val"), "\uf0b7" if kind == "bullet" else "%1.")
+    level.append(level_text)
+    level_jc = OxmlElement("w:lvlJc")
+    level_jc.set(qn("w:val"), "left")
+    level.append(level_jc)
+
+    paragraph_properties = OxmlElement("w:pPr")
+    tabs = OxmlElement("w:tabs")
+    tab = OxmlElement("w:tab")
+    tab.set(qn("w:val"), "num")
+    tab.set(qn("w:pos"), "720")
+    tabs.append(tab)
+    paragraph_properties.append(tabs)
+    indent = OxmlElement("w:ind")
+    indent.set(qn("w:left"), "720")
+    indent.set(qn("w:hanging"), "360")
+    paragraph_properties.append(indent)
+    level.append(paragraph_properties)
+
+    if kind == "bullet":
+        run_properties = OxmlElement("w:rPr")
+        fonts = OxmlElement("w:rFonts")
+        fonts.set(qn("w:ascii"), "Symbol")
+        fonts.set(qn("w:hAnsi"), "Symbol")
+        run_properties.append(fonts)
+        level.append(run_properties)
+
+    abstract.append(level)
+    first_num = root.find(qn("w:num"))
+    if first_num is None:
+        root.append(abstract)
+    else:
+        root.insert(root.index(first_num), abstract)
+
+    numbering_instance = OxmlElement("w:num")
+    numbering_instance.set(qn("w:numId"), str(num_id))
+    abstract_ref = OxmlElement("w:abstractNumId")
+    abstract_ref.set(qn("w:val"), str(abstract_id))
+    numbering_instance.append(abstract_ref)
+    if kind == "decimal":
+        level_override = OxmlElement("w:lvlOverride")
+        level_override.set(qn("w:ilvl"), "0")
+        start_override = OxmlElement("w:startOverride")
+        start_override.set(qn("w:val"), "1")
+        level_override.append(start_override)
+        numbering_instance.append(level_override)
+    root.append(numbering_instance)
+    return num_id
 
 def set_cell_text(cell, text: str, bold: bool = False, header: bool = False) -> None:
     paragraph = cell.paragraphs[0]
@@ -162,6 +277,10 @@ def add_table(doc: Document, lines: list[str], indent_dxa: int = 0) -> None:
     
     # Make table look elegant
     for r_idx, row_data in enumerate(cleaned_rows):
+        tr_pr = table.rows[r_idx]._tr.get_or_add_trPr()
+        tr_pr.append(OxmlElement("w:cantSplit"))
+        if r_idx == 0:
+            tr_pr.append(OxmlElement("w:tblHeader"))
         for c_idx in range(col_count):
             text = row_data[c_idx] if c_idx < len(row_data) else ""
             is_header = (r_idx == 0)
@@ -410,6 +529,7 @@ def convert_markdown_to_docx(
     index = 0
     in_metadata = False
     metadata_items = []
+    bullet_num_id = None
     
     while index < len(lines):
         line = lines[index]
@@ -598,9 +718,16 @@ def convert_markdown_to_docx(
                     else:
                         metadata_items.append((item_text.strip(), ""))
             else:
+                if is_bullet:
+                    if bullet_num_id is None:
+                        bullet_num_id = add_numbering_definition(doc, "bullet")
+                    list_num_id = bullet_num_id
+                else:
+                    list_num_id = add_numbering_definition(doc, "decimal")
                 for item_text, style_name in list_items:
                     p = doc.add_paragraph(style=style_name)
                     apply_paragraph_indent(p, default_left_indent, is_list=True)
+                    set_paragraph_numbering(p, list_num_id)
                     add_inline_runs(p, item_text)
                 doc.add_paragraph("")
             continue

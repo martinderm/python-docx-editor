@@ -1,6 +1,6 @@
 # OOXML Numbering – Kurznotizen für python-docx-editor
 
-Stand: 2026-03-18
+Stand: 2026-08-11
 
 ## Relevantes Modell (WordprocessingML)
 
@@ -13,6 +13,8 @@ Stand: 2026-03-18
 Für unser Problem wichtig:
 - Unterschiedliche Kapitel sollten bei geordneten Listen (OL) nicht dieselbe laufende Instanz teilen, sonst zählt Word weiter.
 - Für Neustart einer OL ist pro neuem Listenblock eine frische `w:num`-Instanz sinnvoll; alternativ/ergänzend über `w:lvlOverride` + `w:startOverride` explizit Startwert setzen.
+- In `word/numbering.xml` müssen alle `w:abstractNum`-Elemente vor den `w:num`-Elementen stehen. Neue abstrakte Definitionen deshalb vor dem ersten `w:num` einfügen; Word kann falsch einsortierte Definitionen reparieren oder ignorieren.
+- Für robuste Bullets `w:numFmt val="bullet"`, ein sichtbares `w:lvlText` (z. B. `\uf0b7`) und passende `w:rFonts` (z. B. `Symbol`) setzen. Nur der Absatz-Style `List Bullet` garantiert in fremden Vorlagen kein sichtbares Aufzählungszeichen.
 
 ## Override/Restart
 
@@ -23,6 +25,7 @@ Praktische Konsequenz für den Patcher:
 1. Für UL immer eine Bullet-Definition verwenden (`numFmt=bullet`).
 2. Für OL pro Markdown-Listenblock eigene Nummerierungsinstanz erzeugen (kein ungewolltes Kapitel-Weiterzählen).
 3. Optional streng: pro OL-Block zusätzlich `lvlOverride(ilvl=0) + startOverride(1)` setzen.
+4. Neue `w:abstractNum`-Definitionen vor dem ersten bestehenden `w:num` einfügen.
 
 ## Quelle (Microsoft Learn)
 

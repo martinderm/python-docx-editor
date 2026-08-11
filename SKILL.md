@@ -53,6 +53,8 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
 ### Markdown-Konvertierung: Front Matter und Tabellenorientierung
 
 - Beide Markdown-Konverter überspringen optionales YAML Front Matter am Dateianfang (`---` … `---`), damit Metadaten wie `title:` oder `project_slug:` nicht als sichtbarer Dokumenttext ausgegeben werden. Ein einzelnes, nicht geschlossenes `---` bleibt eine reguläre Markdown-Trennlinie.
+- Beide Markdown-Konverter setzen Listen zusätzlich zum Absatz-Style über explizite OOXML-Nummerierung. Jeder eigenständige nummerierte Markdown-Listenblock erhält eine neue Nummerierungsinstanz mit Startwert 1; dadurch werden spätere Listen nicht versehentlich fortgesetzt. Bullets erhalten eine sichtbare Bullet-Definition, auch wenn die Word-Vorlage keine funktionale Listenformatierung mitbringt.
+- Der vorlagenbasierte Konverter wandelt `<br>`, `<br/>` und `<br />` in echte Word-Zeilenumbrüche um. Markdown-Tabellen erhalten eine wiederholbare Kopfzeile und Zeilen, die Word nicht über Seiten trennt.
 - `markdown_to_docx.py` erzeugt ein eigenständiges, formatiertes DOCX im Hochformat.
 - Für vorlagenbasierte Dokumente oder Tabellen im Querformat nutze `markdown_to_template_docx.py`.
 - Mit `--table-orientation landscape` wird eine Überschrift der Ebene 2 oder 3, auf die direkt (Leerzeilen erlaubt) eine Markdown-Tabelle folgt, gemeinsam mit der Tabelle im Querformat platziert. Das vermeidet Seiten, die nur eine Überschrift enthalten.
@@ -503,7 +505,7 @@ Vor Veröffentlichung sicherstellen:
 - [ ] Optionaler v1-RAG-Output funktioniert via `--rag-output`
 - [ ] `apply_docx_patch.py` validiert `expected_matches` und blockiert Run-Grenzkonflikte
 - [ ] `SKILL.md`-Schemas entsprechen dem tatsächlichen CLI-Verhalten
-- [ ] Markdown-Konverter überspringen YAML Front Matter und platzieren Überschrift-Tabellen-Blöcke im Querformat ohne Überschrift-Alleinseite
+- [ ] Markdown-Konverter überspringen YAML Front Matter, starten getrennte nummerierte Listen bei 1 und platzieren Überschrift-Tabellen-Blöcke im Querformat ohne Überschrift-Alleinseite
 - [ ] Keine Testartefakte versehentlich versioniert (lokale Dateien bleiben in `Tests/`)
 
 ## Versioning Notes

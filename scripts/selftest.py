@@ -41,6 +41,50 @@ def has_section_break(element) -> bool:
     return element.find(f".//{qn('w:sectPr')}") is not None
 
 
+def paragraph_num_id(paragraph) -> int | None:
+    num_id = paragraph._p.find(f"./{qn('w:pPr')}/{qn('w:numPr')}/{qn('w:numId')}")
+    if num_id is None:
+        return None
+    raw = num_id.get(qn("w:val"))
+    return int(raw) if raw is not None else None
+
+
+def numbering_format(document: Document, num_id: int) -> str | None:
+    root = document.part.numbering_part._element
+    abstract_id = None
+    for num in root.findall(qn("w:num")):
+        if num.get(qn("w:numId")) != str(num_id):
+            continue
+        abstract_ref = num.find(qn("w:abstractNumId"))
+        if abstract_ref is not None:
+            abstract_id = abstract_ref.get(qn("w:val"))
+        break
+    if abstract_id is None:
+        return None
+
+    for abstract in root.findall(qn("w:abstractNum")):
+        if abstract.get(qn("w:abstractNumId")) != abstract_id:
+            continue
+        num_fmt = abstract.find(f"./{qn('w:lvl')}/{qn('w:numFmt')}")
+        return num_fmt.get(qn("w:val")) if num_fmt is not None else None
+    return None
+
+
+def numbering_start_override(document: Document, num_id: int) -> int | None:
+    root = document.part.numbering_part._element
+    for num in root.findall(qn("w:num")):
+        if num.get(qn("w:numId")) != str(num_id):
+            continue
+        start_override = num.find(
+            f"./{qn('w:lvlOverride')}/{qn('w:startOverride')}"
+        )
+        if start_override is None:
+            return None
+        raw = start_override.get(qn("w:val"))
+        return int(raw) if raw is not None else None
+    return None
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="python-docx-editor-") as tmpdir:
         t = Path(tmpdir)
@@ -195,7 +239,14 @@ def main() -> int:
             "| --- | --- |\n"
             "| Team | Confirm funding |\n\n"
             "## Closing\n\n"
-            "Visible closing text.\n",
+            "Visible closing text.<br>Second line.\n\n"
+            "1. First numbered item\n"
+            "2. Second numbered item\n\n"
+            "Separating paragraph.\n\n"
+            "1. Restarted numbered item\n"
+            "2. Restarted second item\n\n"
+            "- First bullet\n"
+            "- Second bullet\n",
             encoding="utf-8",
         )
         run(
@@ -219,6 +270,64 @@ def main() -> int:
         assert "Visible closing text." in template_text, "Template body missing"
         assert "title: Internal report metadata" not in template_text, "Template YAML front matter was rendered"
         assert len(template_doc.tables) == 2, "Expected two landscape tables"
+
+        paragraph_by_text = {
+            paragraph.text.strip(): paragraph
+            for paragraph in template_doc.paragraphs
+            if paragraph.text.strip()
+        }
+        first_number_ids = {
+            paragraph_num_id(paragraph_by_text["First numbered item"]),
+            paragraph_num_id(paragraph_by_text["Second numbered item"]),
+        }
+        restarted_number_ids = {
+            paragraph_num_id(paragraph_by_text["Restarted numbered item"]),
+            paragraph_num_id(paragraph_by_text["Restarted second item"]),
+        }
+        bullet_ids = {
+            paragraph_num_id(paragraph_by_text["First bullet"]),
+            paragraph_num_id(paragraph_by_text["Second bullet"]),
+        }
+        assert None not in first_number_ids, "First numbered block lacks explicit OOXML numbering"
+        assert len(first_number_ids) == 1, "First numbered block uses inconsistent numbering IDs"
+        assert None not in restarted_number_ids, "Restarted numbered block lacks explicit OOXML numbering"
+        assert len(restarted_number_ids) == 1, "Restarted numbered block uses inconsistent numbering IDs"
+        assert first_number_ids != restarted_number_ids, "Separate numbered blocks share one numbering instance"
+        assert numbering_format(template_doc, next(iter(first_number_ids))) == "decimal", "Numbered block is not decimal"
+        assert numbering_format(template_doc, next(iter(restarted_number_ids))) == "decimal", "Restarted block is not decimal"
+        assert numbering_start_override(template_doc, next(iter(first_number_ids))) == 1, "First numbered block does not restart at 1"
+        assert numbering_start_override(template_doc, next(iter(restarted_number_ids))) == 1, "Restarted block does not restart at 1"
+        assert None not in bullet_ids, "Bullet block lacks explicit OOXML numbering"
+        assert len(bullet_ids) == 1, "Bullet block uses inconsistent numbering IDs"
+        assert numbering_format(template_doc, next(iter(bullet_ids))) == "bullet", "Bullet block is not a bullet list"
+
+        numbering_children = list(template_doc.part.numbering_part._element)
+        abstract_positions = [
+            index
+            for index, child in enumerate(numbering_children)
+            if child.tag == qn("w:abstractNum")
+        ]
+        instance_positions = [
+            index
+            for index, child in enumerate(numbering_children)
+            if child.tag == qn("w:num")
+        ]
+        assert max(abstract_positions) < min(instance_positions), "OOXML numbering definitions are ordered incorrectly"
+
+        closing = next(
+            paragraph
+            for paragraph in template_doc.paragraphs
+            if paragraph.text.startswith("Visible closing text.")
+        )
+        assert closing._p.find(f".//{qn('w:br')}") is not None, "Markdown <br> was not converted to a Word line break"
+        assert "<br>" not in closing.text.lower(), "Literal Markdown <br> leaked into DOCX"
+
+        for table in template_doc.tables:
+            for row_index, row in enumerate(table.rows):
+                tr_pr = row._tr.get_or_add_trPr()
+                assert tr_pr.find(qn("w:cantSplit")) is not None, "Table row may split across pages"
+                if row_index == 0:
+                    assert tr_pr.find(qn("w:tblHeader")) is not None, "Table header is not marked to repeat"
 
         body_children = list(template_doc.element.body)
         for heading_text in ("Risks", "Actions"):
