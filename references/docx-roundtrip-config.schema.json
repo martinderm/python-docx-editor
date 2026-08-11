@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "docx-roundtrip-config.v1",
+  "title": "Config-driven Markdown-DOCX roundtrip",
+  "type": "object",
+  "required": [
+    "schema",
+    "document_id",
+    "canonical_markdown",
+    "template",
+    "working_directory",
+    "cloud"
+  ],
+  "properties": {
+    "schema": {
+      "const": "docx-roundtrip-config.v1"
+    },
+    "document_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$"
+    },
+    "canonical_markdown": {
+      "type": "string",
+      "minLength": 1
+    },
+    "template": {
+      "type": "string",
+      "minLength": 1
+    },
+    "working_directory": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Machine state and all revisions. Prefer data/ so RAG systems do not index revisions."
+    },
+    "cloud": {
+      "type": "object",
+      "required": ["directory", "review_pattern", "archive_directory"],
+      "properties": {
+        "directory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "review_pattern": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Must contain exactly one {revision} placeholder."
+        },
+        "archive_directory": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "conversion": {
+      "type": "object",
+      "properties": {
+        "markdown_to_docx": {
+          "type": "string",
+          "minLength": 1
+        },
+        "docx_to_markdown": {
+          "type": "string",
+          "minLength": 1
+        },
+        "extract_structure": {
+          "type": "string",
+          "minLength": 1
+        },
+        "table_orientation": {
+          "enum": ["portrait", "landscape"],
+          "default": "portrait"
+        },
+        "bookmark_prefix": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]{0,15}$"
+        },
+        "preserve_frontmatter": {
+          "type": "boolean",
+          "default": true
+        },
+        "merge_sections_into_landscape": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["heading"],
+            "properties": {
+              "heading": {
+                "type": "string",
+                "minLength": 1
+              },
+              "keep_following_paragraphs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 20,
+                "default": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "import_policy": {
+      "type": "object",
+      "properties": {
+        "automatic_overwrite": {
+          "const": false
+        },
+        "require_candidate_review": {
+          "const": true
+        },
+        "refuse_if_canonical_changed_since_export": {
+          "type": "boolean",
+          "default": true
+        },
+        "high_risk_requires_explicit_override": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

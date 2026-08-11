@@ -26,6 +26,7 @@ PATCH = ROOT / "scripts" / "apply_docx_patch.py"
 FILL_TABLE = ROOT / "scripts" / "fill_docx_table_from_json.py"
 MARKDOWN_TO_DOCX = ROOT / "scripts" / "markdown_to_docx.py"
 MARKDOWN_TO_TEMPLATE_DOCX = ROOT / "scripts" / "markdown_to_template_docx.py"
+ROUNDTRIP_SELFTEST = ROOT / "scripts" / "roundtrip_selftest.py"
 GENERIC_TEMPLATE = ROOT / "templates" / "GenericTemplate.docx"
 
 
@@ -345,6 +346,9 @@ def main() -> int:
                 has_section_break(child)
                 for child in body_children[heading_index + 1 : table_index]
             ), f"Section break inserted between '{heading_text}' and its table"
+
+        roundtrip_test = run([sys.executable, str(ROUNDTRIP_SELFTEST)], ROOT)
+        assert "roundtrip selftest: OK" in roundtrip_test.stdout
 
     print("selftest: OK")
     return 0

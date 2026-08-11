@@ -1,6 +1,6 @@
 ---
 name: python-docx-editor
-description: "Arbeiten mit Word-Dokumenten (.docx) über die Python-Bibliothek python-docx: Text extrahieren, Dokumente erstellen/ändern, Tabellen lesen, einfache Ersetzungen und Struktur-Checks. Use when ein Agent DOCX-Dateien automatisiert verarbeiten soll oder reproduzierbare DOCX-Operationen per Script braucht."
+description: "Arbeiten mit Word-Dokumenten (.docx) über die Python-Bibliothek python-docx: Text extrahieren, Dokumente erstellen/ändern, Tabellen lesen, einfache Ersetzungen, Struktur-Checks und kontrollierte Markdown-DOCX-Review-Roundtrips. Use when ein Agent DOCX-Dateien automatisiert verarbeiten oder einen konfigurationsgetriebenen Word-Reviewprozess mit Revisionen, Diff und sicherem Markdown-Rückimport betreiben soll."
 ---
 
 # Python DOCX Editor
@@ -49,6 +49,18 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
 - Section-/DOCX-Preview für Review:
   - `py -3 scripts/docx_preview.py v2-section --json <structure.v2.json> --title "<Section Title>"`
   - `py -3 scripts/docx_preview.py docx-around --in <out.docx> --contains "<Heading Text>" --lines 25`
+- Konfigurationsgetriebener Markdown–DOCX-Review-Roundtrip:
+  - `py -3 scripts/docx_roundtrip.py --config <roundtrip.json> --root <workspace> validate|status|prepare-import`
+  - Cloud- oder Canonical-Mutationen nur mit `export ... --confirm`, `apply-import --confirm` oder `advance-revision --confirm` ausführen.
+
+### Konfigurationsgetriebener Review-Roundtrip
+
+- Nutze `scripts/docx_roundtrip.py`, damit projektspezifische Ordner nur kanonisches Markdown, `roundtrip.json` und eine kurze Bediennotiz enthalten müssen.
+- Lege `working_directory` standardmäßig unter `data/docx-roundtrips/<document_id>/` ab. Speichere State, Manifeste, Kandidaten, Diffs und alte Revisionen nicht unter `memory/`, wenn dieses Verzeichnis durch ein RAG indexiert wird.
+- Halte im Cloud-Reviewordner nur die aktuelle DOCX und das benutzerfreundliche `Archiv/`. Die Engine akzeptiert keine automatisch ausgewählte „neueste“ Datei, sondern bindet den exakten Dateinamen aus dem State.
+- Validiere jede Konfiguration vor dem ersten Export. Das formale Schema liegt unter `references/docx-roundtrip-config.schema.json`.
+- Behalte `automatic_overwrite: false`. Prüfe `candidate.md`, `changes.diff` und `import-report.json` vor `apply-import --confirm`; nutze `--allow-high-risk` nur nach bewusster Strukturprüfung.
+- Nutze `conversion.merge_sections_into_landscape` nur für wenige deklarative Layoutausnahmen. Ergänze keine projektspezifischen Python-Wrapper, solange die Engine die Regel ausdrücken kann.
 
 ### Markdown-Konvertierung: Front Matter und Tabellenorientierung
 
@@ -493,7 +505,7 @@ Patch nur anwenden, wenn kein Kernclaim ungemappt bleibt.
 1. Umgebung prüfen:
    - `py -3 -m pip install python-docx`
 2. Syntax prüfen:
-   - `py -3 -m py_compile scripts/extract_docx_for_llm.py scripts/apply_docx_patch.py scripts/fill_docx_table_from_json.py scripts/markdown_to_docx.py scripts/markdown_to_template_docx.py scripts/selftest.py`
+   - `py -3 -m py_compile scripts/extract_docx_for_llm.py scripts/apply_docx_patch.py scripts/fill_docx_table_from_json.py scripts/markdown_to_docx.py scripts/markdown_to_template_docx.py scripts/docx_roundtrip.py scripts/roundtrip_selftest.py scripts/selftest.py`
 3. End-to-End-Selbsttest (ohne Repo-Artefakte):
    - `py -3 scripts/selftest.py`
 
@@ -506,6 +518,7 @@ Vor Veröffentlichung sicherstellen:
 - [ ] `apply_docx_patch.py` validiert `expected_matches` und blockiert Run-Grenzkonflikte
 - [ ] `SKILL.md`-Schemas entsprechen dem tatsächlichen CLI-Verhalten
 - [ ] Markdown-Konverter überspringen YAML Front Matter, starten getrennte nummerierte Listen bei 1 und platzieren Überschrift-Tabellen-Blöcke im Querformat ohne Überschrift-Alleinseite
+- [ ] `scripts/roundtrip_selftest.py` prüft Export, Word-Änderung, Kandidat, Import, Archivierung und Folgerevision ohne Live-Artefakte
 - [ ] Keine Testartefakte versehentlich versioniert (lokale Dateien bleiben in `Tests/`)
 
 ## Versioning Notes
