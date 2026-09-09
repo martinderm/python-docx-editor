@@ -733,7 +733,7 @@ def add_horizontal_rule(doc: Document) -> None:
     paragraph._p.get_or_add_pPr().append(borders)  # pylint: disable=protected-access
 
 
-def parse_list_line(raw_line: str) -> tuple[str, int, str] | None:
+def parse_list_line(raw_line: str, in_list: bool = False) -> tuple[str, int, str] | None:
     if not raw_line or not raw_line.strip():
         return None
 
@@ -751,6 +751,13 @@ def parse_list_line(raw_line: str) -> tuple[str, int, str] | None:
     m = re.match(r"^(\d+)\.\s+(.*)$", lstripped)
     if m:
         return ("ol", ilvl, m.group(2).strip())
+
+    if in_list and leading_spaces >= 2 and not (
+        lstripped.startswith(("#", "```", ">"))
+        or is_table_line(raw_line)
+        or lstripped in {"---", "***", "___"}
+    ):
+        return ("text", ilvl, lstripped)
 
     return None
 
@@ -840,14 +847,14 @@ def convert_markdown(src: Path, dst: Path) -> None:
             pending_blank = False
             continue
 
-        parsed_first = parse_list_line(raw)
-        if parsed_first is not None:
+        parsed_first = parse_list_line(raw, in_list=False)
+        if parsed_first is not None and parsed_first[0] in ("ul", "ol"):
             list_items = []
             while index < len(lines):
-                parsed = parse_list_line(lines[index])
+                parsed = parse_list_line(lines[index], in_list=bool(list_items))
                 if parsed is None:
                     if not lines[index].strip() and index + 1 < len(lines):
-                        peek_parsed = parse_list_line(lines[index + 1])
+                        peek_parsed = parse_list_line(lines[index + 1], in_list=True)
                         if peek_parsed is not None:
                             index += 1
                             continue
@@ -865,6 +872,14 @@ def convert_markdown(src: Path, dst: Path) -> None:
                 parent.remove(anchor._element)
 
             for kind, ilvl, item_text in list_items:
+                if kind == "text":
+                    paragraph = doc.add_paragraph()
+                    paragraph.paragraph_format.space_before = Pt(2)
+                    paragraph.paragraph_format.space_after = Pt(1)
+                    paragraph.paragraph_format.left_indent = Pt(18 * (ilvl + 1))
+                    add_inline_runs(paragraph, item_text)
+                    continue
+
                 style_name = "List Bullet" if kind == "ul" else "List Number"
                 paragraph = doc.add_paragraph(style=style_name)
                 paragraph.paragraph_format.space_before = Pt(0)
