@@ -11,6 +11,8 @@ Thumbs.db
 Tests/
 
 # ADR-0014: local harness artifacts stay out of the artifact repo
+.agents/session.lock
+.agents/skills/
 .agents/
 /runs/
 /opencode.json
