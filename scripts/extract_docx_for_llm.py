@@ -26,6 +26,8 @@ from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 
+from docx_review import build_review
+
 
 @dataclass
 class Block:
@@ -465,8 +467,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     doc = Document(str(args.infile))
+    review = build_review(args.infile)
 
     v2 = extract_v2(args.infile, doc, table_row_batch=args.table_row_batch)
+    v2["review"] = review
     write_json(args.outfile, v2)
 
     result: dict[str, Any] = {
@@ -479,6 +483,7 @@ def main() -> int:
         blocks = extract_v1_blocks(doc, table_row_batch=args.table_row_batch)
         chunks = chunk_blocks(blocks, max_chars=max(500, args.max_chars), overlap=max(0, args.overlap_blocks))
         v1 = build_v1(args.infile, blocks, chunks)
+        v1["review"] = review
         write_json(args.rag_outfile, v1)
         result["rag_output"] = str(args.rag_outfile)
         result["rag_blocks"] = v1["stats"]["blocks"]

@@ -19,6 +19,8 @@ from pathlib import Path
 
 from docx import Document
 
+from docx_review import build_review
+
 
 def cmd_text(infile: Path) -> None:
     doc = Document(str(infile))
@@ -282,6 +284,7 @@ def inspect_formatting(infile: Path) -> dict:
                         nearest_heading = old_heading
                         tbl_index += 1
 
+    results["review"] = build_review(infile)
     return results
 
 
