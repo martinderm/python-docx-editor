@@ -32,6 +32,7 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
   - `py -3 scripts/docx_ops.py replace --in <in.docx> --out <out.docx> --find "Alt" --replace "Neu"`
 - Word-Kommentare, Revisions-History (Insertions, Deletions) und farbige Markierungen auslesen:
   - `py -3 scripts/docx_ops.py inspect --in <datei.docx> [--json]`
+  - Bei `--json` bleibt die Legacy-Ausgabe (`comments`, `revisions`, `highlights`) erhalten; zusätzlich liefert `review` (`docx-review.v1`) kontextuelle Absätze, Textansichten, Revisionsbereiche, Kommentar-Anker und Einschränkungen.
 - LLM-freundliche Extraktion (v2, hierarchisch nach Sections/Content):
   - `py -3 scripts/extract_docx_for_llm.py --in <in.docx> --out <structure.v2.json>`
 - Optionaler RAG-Output (v1, flat blocks+chunks):
@@ -238,6 +239,101 @@ Hinweise zu IDs:
 ### 2b) Optionales RAG-Schema: `docx-llm-chunks.v1` (`--rag-output`)
 
 Wenn `--rag-output <pfad>` gesetzt ist, wird zusätzlich ein v1-JSON mit `blocks[]` und `chunks[]` erzeugt (kompatibel für Retrieval-Pipelines).
+
+### 2c) Additives Review-Schema: `docx-review.v1` (`review`)
+
+`docx_ops.py inspect --json`, der v2-Output und der optionale v1-RAG-Output
+enthalten auf oberster Ebene dasselbe Feld `review`. Es ist rein lesend und
+verändert weder die Legacy-Felder noch v2-/v1-Text, IDs, Statistiken oder
+Chunks.
+
+```json
+{
+  "schema": "docx-review.v1",
+  "paragraphs": [
+    {
+      "location": {"part": "word/document.xml", "path": "/document[1]/body[1]/p[1]"},
+      "text_original": "ADEFG",
+      "text_proposed": "ABCDG",
+      "text_markup": "ABCDEFG"
+    }
+  ],
+  "revisions": [
+    {
+      "kind": "delete",
+      "id": "11",
+      "author": "Bob",
+      "date": "2026-10-02T11:30:00Z",
+      "text": "EF",
+      "location": {"part": "word/document.xml", "path": "/document[1]/body[1]/p[1]"},
+      "ranges": {"original": [2, 4], "proposed": [4, 4], "markup": [4, 6]},
+      "missing_metadata": []
+    }
+  ],
+  "comments": [],
+  "limitations": [],
+  "coverage": {"supported_parts": ["word/document.xml"], "text_views_complete": true}
+}
+```
+
+Koordinaten und Textansichten:
+
+- `location.part` ohne führenden Slash; `location.path` mit 1-basierten
+  Geschwisterindizes, z. B. `/document[1]/body[1]/tbl[1]/tr[1]/tc[1]/p[1]`.
+  Verschachtelte Tabellen setzen die `tbl/tr/tc/p`-Kette fort.
+- Bereiche sind 0-basierte, Ende-exklusive Unicode-Codepoint-Offsets.
+  `w:tab` wird zum Tabulator, `w:br`/`w:cr` zum Zeilenumbruch; Whitespace wird
+  nicht normalisiert.
+- `original` lässt Einfügungen aus und enthält Löschungen; `proposed` enthält
+  Einfügungen und lässt Löschungen aus; `markup` enthält beides. Ausgelassener
+  Text hat in der jeweiligen Ansicht einen kollabierten Bereich `[n, n]`; `n`
+  ist die tatsächliche, nullbreite Textgrenze vor dem ausgelassenen Inhalt.
+  Eine Löschung von `EF` hinter vorgeschlagenem `ABCD` ergibt
+  `proposed: [4, 4]` (nicht `[3, 3]`), eine Löschung am Absatzanfang `[0, 0]`
+  und eine am Absatzende `[len, len]`.
+- Nur Word-Namespace-Elemente (`w:ins`, `w:del`, `w:t`, `w:p`, …) gelten als
+  Word-Inhalt. Fremde Lookalikes in anderen Namespaces erscheinen als nicht
+  unterstützter Inhalt und gelangen nie in eine Textansicht.
+- Absätze umfassen den Haupttext einschließlich Tabellenzellen,
+  verschachtelter Tabellen und Absätzen in `w:customXml`-Wrappern.
+  Textbox-Inhalte werden nicht dem umgebenden Absatz zugeschlagen.
+
+Revisionen, Kommentare und Grenzen:
+
+- Ein Datensatz pro textertragender `w:ins`/`w:del`-Revision; mehrere Runs
+  derselben Revision werden zusammengeführt. Fehlende `author`/`date` sind
+  `null` und stehen in `missing_metadata`; IDs bleiben Strings.
+- Kommentare enthalten `resolved` (`true`/`false`/`null`), `parent_id`,
+  `reply_ids` und `anchor`. Fehlender Status wird nie als offen ausgegeben.
+  `anchor.status` ist `resolved`, `unresolved` (mit Diagnose wie
+  `orphan_anchor`, `duplicate_anchor`, `reversed_anchor`) oder `thread_only`
+  für Antworten ohne eigene Range. Segmente erhalten absatzübergreifende
+  Bereiche in allen drei Ansichten.
+- Moves, Format-/Strukturänderungen, unbekannte Revisionen, Textboxen und
+  Review-Marker in jedem anderen WordprocessingML-Part erscheinen als
+  strukturierte `limitations`: Header, Footer, Fuß-/Endnoten,
+  `word/comments.xml`, das Glossar und jeder weitere `word/*.xml`-Story.
+  `unsupported_content` deckt nicht traversierte Body-Wrapper (z. B.
+  `altChunk`) und Fremd-Namespace-Elemente ab. `coverage.text_views_complete`
+  ist dann `false`; das ist keine Vollständigkeitsgarantie für das gesamte
+  Paket.
+- Kommentar- und Thread-Mehrdeutigkeit wird diagnostiziert statt geraten;
+  jede Diagnose behält Part, exakten XML-Pfad und Kommentar-/Revisions-ID.
+  `ambiguous_comment_id` lässt alle betroffenen Anker `unresolved`; doppelte
+  `paraId`s ergeben `ambiguous_thread_metadata`, ohne Done-Status oder Parent
+  zu binden; Selbst-/zyklische `paraIdParent`-Bezüge ergeben
+  `self_parent_reference`/`cyclic_parent_reference` ohne verlässliche
+  `parent_id` oder `reply_ids`. `w15:done` akzeptiert `true`/`false`/`1`/`0`;
+  ein fehlender Wert ist `null`, ein ungültiger Wert bleibt `null` mit
+  `malformed_thread_metadata` am betroffenen `commentEx`-Ort.
+- Ungültiges ZIP/XML führt zu einem klaren Fehler statt zu einer leeren
+  Erfolgsausgabe.
+- Unter Windows kann gepipter CLI-Output an der Legacy-Konsole (`cp1252`)
+  scheitern, wenn Review-Text Nicht-ASCII-Zeichen enthält. Für Review-Befehle
+  `PYTHONIOENCODING=utf-8` setzen, z. B.
+  `$env:PYTHONIOENCODING='utf-8'; py -3 scripts/docx_ops.py inspect --in input.docx --json`.
+  Das bestehende CLI-Konsolenverhalten wird durch dieses Feature nicht
+  verändert.
 
 ---
 
@@ -505,15 +601,18 @@ Patch nur anwenden, wenn kein Kernclaim ungemappt bleibt.
 1. Umgebung prüfen:
    - `py -3 -m pip install python-docx`
 2. Syntax prüfen:
-   - `py -3 -m py_compile scripts/extract_docx_for_llm.py scripts/apply_docx_patch.py scripts/fill_docx_table_from_json.py scripts/markdown_to_docx.py scripts/markdown_to_template_docx.py scripts/docx_roundtrip.py scripts/roundtrip_selftest.py scripts/selftest.py`
+   - `py -3 -m py_compile scripts/extract_docx_for_llm.py scripts/docx_review.py scripts/apply_docx_patch.py scripts/fill_docx_table_from_json.py scripts/markdown_to_docx.py scripts/markdown_to_template_docx.py scripts/docx_roundtrip.py scripts/roundtrip_selftest.py scripts/selftest.py`
 3. End-to-End-Selbsttest (ohne Repo-Artefakte):
    - `py -3 scripts/selftest.py`
+4. Review-Vertragstests:
+   - `py -3 -m unittest discover -s tests -p test_docx_review.py -v`
 
 ## Release Readiness Checklist
 
 Vor Veröffentlichung sicherstellen:
 - [ ] `scripts/selftest.py` läuft lokal grün
 - [ ] v2-Output (`docx-structure.v2`) bleibt default
+- [ ] `review` (`docx-review.v1`) ist in inspect, v2 und optional v1 identisch; Legacy-Felder, IDs, Statistiken und Chunktexte bleiben unverändert
 - [ ] Optionaler v1-RAG-Output funktioniert via `--rag-output`
 - [ ] `apply_docx_patch.py` validiert `expected_matches` und blockiert Run-Grenzkonflikte
 - [ ] `SKILL.md`-Schemas entsprechen dem tatsächlichen CLI-Verhalten

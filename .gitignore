@@ -9,6 +9,11 @@ venv/
 .DS_Store
 Thumbs.db
 Tests/
+# Keep generated/manual documents ignored, but version the review contract tests.
+!/tests/
+/tests/*
+!/tests/__init__.py
+!/tests/test_docx_review.py
 
 # ADR-0014: local harness artifacts stay out of the artifact repo
 .agents/session.lock
