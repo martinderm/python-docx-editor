@@ -9,3 +9,12 @@ venv/
 .DS_Store
 Thumbs.db
 Tests/
+
+# ADR-0014: local harness artifacts stay out of the artifact repo
+.agents/
+/runs/
+/opencode.json
+.opencode/
+agents/kit-binding.json
+agents/model-profile.json
+.pytest_cache/
