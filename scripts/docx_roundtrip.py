@@ -24,6 +24,8 @@ from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
+from docx_review import DocxReviewError, build_review
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REVISION_RE = re.compile(r"^R(?P<number>\d{4})$")
@@ -130,6 +132,9 @@ def validate_config_data(config: dict[str, Any]) -> None:
         raise RuntimeError(
             "require_candidate_review=false wird aus Sicherheitsgründen nicht unterstützt"
         )
+    resolution = policy.get("open_revisions", "accept")
+    if resolution not in {"accept", "refuse"}:
+        raise RuntimeError("import_policy.open_revisions muss accept oder refuse sein")
 
 
 def next_revision(revision: str) -> str:
@@ -497,13 +502,22 @@ class RoundtripEngine:
             return "candidate_prepared"
         return "modified"
 
-    def extract_docx(self, docx: Path, markdown_out: Path, structure_out: Path) -> None:
+    def extract_docx(
+        self,
+        docx: Path,
+        markdown_out: Path,
+        structure_out: Path,
+        *,
+        revisions: str = "accept",
+    ) -> None:
         self.run_python(
             self.tool("docx_to_markdown", "docx_to_markdown.py"),
             "--in",
             str(docx),
             "--out",
             str(markdown_out),
+            "--revisions",
+            revisions,
         )
         self.run_python(
             self.tool("extract_structure", "extract_docx_for_llm.py"),
@@ -512,6 +526,56 @@ class RoundtripEngine:
             "--out",
             str(structure_out),
         )
+
+    def refuse_open_revisions(
+        self,
+        review: dict[str, Any] | None,
+        fallback_docx: Path | None = None,
+    ) -> None:
+        """Enforce ``import_policy.open_revisions: refuse`` against a report."""
+        if self.policy.get("open_revisions", "accept") != "refuse":
+            return
+        if review is None and fallback_docx is not None:
+            review = self.review_summary(fallback_docx)
+        review = review or {}
+        if review.get("open_revisions") or review.get("comments"):
+            raise RuntimeError(
+                "Word-Datei enthält offene Änderungen oder Kommentare; "
+                "import_policy.open_revisions=refuse blockiert den Import. "
+                "Änderungen annehmen oder ablehnen und erneut exportieren."
+            )
+
+    def review_summary(self, docx_path: Path) -> dict[str, Any]:
+        """Open revisions and comments of an incoming file, as ``docx-review.v1``."""
+        try:
+            review = build_review(docx_path)
+        except DocxReviewError as error:
+            raise RuntimeError(f"Word-Datei nicht lesbar: {error}") from error
+        revisions = review.get("revisions") or []
+        comments = review.get("comments") or []
+        kinds: dict[str, int] = {}
+        for revision in revisions:
+            kind = str(revision.get("kind", "unknown"))
+            kinds[kind] = kinds.get(kind, 0) + 1
+        return {
+            "schema": review.get("schema"),
+            "text_view": "accept",
+            "open_revisions": len(revisions),
+            "revisions_by_kind": kinds,
+            "revision_authors": sorted(
+                {str(item["author"]) for item in revisions if item.get("author")}
+            ),
+            "comments": len(comments),
+            "comment_authors": sorted(
+                {str(item["author"]) for item in comments if item.get("author")}
+            ),
+            "text_views_complete": bool(
+                (review.get("coverage") or {}).get("text_views_complete", False)
+            ),
+            "limitations": [
+                str(item.get("code")) for item in review.get("limitations") or []
+            ],
+        }
 
     def export_revision(self, revision: str, *, replace: bool = False) -> dict[str, Any]:
         if REVISION_RE.fullmatch(revision) is None:
@@ -670,6 +734,10 @@ class RoundtripEngine:
             and incoming_hash == state.get("last_seen_docx_sha256")
             and report_path.exists()
         ):
+            self.refuse_open_revisions(
+                load_json(report_path).get("review"),
+                paths["revision_dir"] / "incoming.docx",
+            )
             return {"status": "candidate_already_prepared", "revision": revision}
 
         incoming_docx = paths["revision_dir"] / "incoming.docx"
@@ -678,7 +746,9 @@ class RoundtripEngine:
         candidate = paths["revision_dir"] / "candidate.md"
         diff_path = paths["revision_dir"] / "changes.diff"
         shutil.copy2(cloud_docx, incoming_docx)
-        self.extract_docx(incoming_docx, incoming_md, incoming_structure)
+        self.extract_docx(incoming_docx, incoming_md, incoming_structure, revisions="accept")
+        review = self.review_summary(incoming_docx)
+        self.refuse_open_revisions(review)
 
         canonical = self.path(self.config["canonical_markdown"])
         canonical_text = canonical.read_text(encoding="utf-8-sig")
@@ -727,6 +797,8 @@ class RoundtripEngine:
             risk = "medium"
         else:
             risk = "low"
+        if risk == "low" and (review["open_revisions"] or review["comments"]):
+            risk = "medium"
         report = {
             "schema": REPORT_SCHEMA,
             "document_id": self.document_id,
@@ -734,6 +806,7 @@ class RoundtripEngine:
             "prepared_at": now_iso(),
             "incoming_docx_sha256": incoming_hash,
             "risk": risk,
+            "review": review,
             "structure": {
                 "heading_sequence_unchanged": base_sequence == edited_sequence,
                 "bookmarks_expected": expected_bookmarks,
@@ -770,6 +843,9 @@ class RoundtripEngine:
         revision = state["current_revision"]
         paths = self.revision_paths(revision)
         report = load_json(paths["revision_dir"] / "import-report.json")
+        self.refuse_open_revisions(
+            report.get("review"), paths["revision_dir"] / "incoming.docx"
+        )
         candidate = paths["revision_dir"] / "candidate.md"
         canonical = self.path(self.config["canonical_markdown"])
         cloud_docx = self.path(state["cloud_docx"])

@@ -118,6 +118,12 @@
         "high_risk_requires_explicit_override": {
           "type": "boolean",
           "default": true
+        },
+        "open_revisions": {
+          "type": "string",
+          "enum": ["accept", "refuse"],
+          "default": "accept",
+          "description": "How open tracked changes and comments in the returned DOCX are handled: accept reads the proposed text and records them in the report; refuse stops prepare-import until they are resolved."
         }
       },
       "additionalProperties": false
