@@ -46,7 +46,8 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
 - Markdown nach DOCX auf Basis einer Word-Vorlage konvertieren (erhält Kopf-/Fußzeilen, Seitenformat, Ränder und Styles):
   - `py -3 scripts/markdown_to_template_docx.py --in <in.md> --out <out.docx> [--template <vorlage.docx>] [--table-orientation portrait|landscape]`
 - DOCX nach Markdown konvertieren (generische Konvertierung mit Erhalt von Fett-/Kursivschrift und Tabellen):
-  - `py -3 scripts/docx_to_markdown.py --in <in.docx> --out <out.md>`
+  - `py -3 scripts/docx_to_markdown.py --in <in.docx> --out <out.md> [--revisions accept|reject]`
+  - `--revisions accept` (Standard) gibt die Vorschlagsfassung aus, `reject` die Originalfassung. Ein offener Nachverfolgungsmodus wird nicht mehr stillschweigend verworfen.
 - Section-/DOCX-Preview für Review:
   - `py -3 scripts/docx_preview.py v2-section --json <structure.v2.json> --title "<Section Title>"`
   - `py -3 scripts/docx_preview.py docx-around --in <out.docx> --contains "<Heading Text>" --lines 25`
@@ -61,6 +62,7 @@ Nutze diesen Skill für wiederholbare DOCX-Aufgaben mit `python-docx`.
 - Halte im Cloud-Reviewordner nur die aktuelle DOCX und das benutzerfreundliche `Archiv/`. Die Engine akzeptiert keine automatisch ausgewählte „neueste“ Datei, sondern bindet den exakten Dateinamen aus dem State.
 - Validiere jede Konfiguration vor dem ersten Export. Das formale Schema liegt unter `references/docx-roundtrip-config.schema.json`.
 - Behalte `automatic_overwrite: false`. Prüfe `candidate.md`, `changes.diff` und `import-report.json` vor `apply-import --confirm`; nutze `--allow-high-risk` nur nach bewusster Strukturprüfung.
+- Ein Rücklauf mit offenen Änderungen oder Kommentaren wird im Vorschlagsmodus gelesen und im Report unter `review` ausgewiesen; `risk` steigt dadurch mindestens auf `medium`. Mit `import_policy.open_revisions: refuse` verweigern `prepare-import` und `apply-import` den Import, bis Änderungen angenommen oder abgelehnt sind. Ohne diese Angabe gilt `accept`.
 - Nutze `conversion.merge_sections_into_landscape` nur für wenige deklarative Layoutausnahmen. Ergänze keine projektspezifischen Python-Wrapper, solange die Engine die Regel ausdrücken kann.
 
 ### Markdown-Konvertierung: Front Matter und Tabellenorientierung
